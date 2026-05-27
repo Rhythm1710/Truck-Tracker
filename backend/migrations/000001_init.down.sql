@@ -1,0 +1,4 @@
+DROP TABLE IF EXISTS device_sessions;
+DROP TABLE IF EXISTS positions;
+DROP TABLE IF EXISTS devices;
+DROP TABLE IF EXISTS users;

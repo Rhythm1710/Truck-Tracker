@@ -1,0 +1,41 @@
+# --- secrets & local config ---
+backend/.env
+backend/firebase-service-account.json
+mobile/.env
+mobile/src/lib/env.ts.local
+
+# --- iOS / Android Firebase artifacts (treat as secrets) ---
+mobile/ios/GoogleService-Info.plist
+mobile/android/app/google-services.json
+
+# --- Go build output ---
+backend/bin/
+*.test
+*.out
+
+# --- Node ---
+mobile/node_modules/
+mobile/.yarn/
+mobile/yarn-error.log
+mobile/npm-debug.log*
+
+# --- iOS build output ---
+mobile/ios/Pods/
+mobile/ios/build/
+mobile/ios/*.xcworkspace/xcuserdata/
+mobile/ios/*.xcodeproj/xcuserdata/
+
+# --- Android build output ---
+mobile/android/.gradle/
+mobile/android/build/
+mobile/android/app/build/
+mobile/android/local.properties
+
+# --- IDE ---
+.vscode/
+.idea/
+*.swp
+.DS_Store
+
+# --- sqlc-generated (commit if you prefer; keep ignored if you regenerate in CI) ---
+# backend/internal/store/sqlc/
