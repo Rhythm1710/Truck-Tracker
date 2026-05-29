@@ -17,7 +17,9 @@ help:
 
 run:
 	@if [ ! -f .env ]; then echo "Missing .env (copy .env.example)"; exit 1; fi
-	@set -a && . ./.env && set +a && go run ./cmd/server
+	@mkdir -p bin
+	@go build -o bin/server ./cmd/server
+	@set -a && . ./.env && set +a && ./bin/server
 
 faketracker:  ## Run the fake Pictor PS10A device against a local server
 	go run ./cmd/faketracker -addr 127.0.0.1:5023 -imei 123456789012345 -lat 29.6857 -lng 76.9905 -interval 5s
@@ -40,10 +42,12 @@ sqlc:
 	sqlc generate
 
 migrate-up:
-	migrate -database "$(DATABASE_URL)" -path migrations up
+	@if [ ! -f .env ]; then echo "Missing .env (copy .env.example)"; exit 1; fi
+	@set -a && . ./.env && set +a && migrate -database "$$DATABASE_URL" -path migrations up
 
 migrate-down:
-	migrate -database "$(DATABASE_URL)" -path migrations down 1
+	@if [ ! -f .env ]; then echo "Missing .env (copy .env.example)"; exit 1; fi
+	@set -a && . ./.env && set +a && migrate -database "$$DATABASE_URL" -path migrations down 1
 
 tidy:
 	go mod tidy
