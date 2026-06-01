@@ -60,25 +60,26 @@ func (s *Server) Run(ctx context.Context) error {
 
 func (s *Server) handle(ctx context.Context, c net.Conn) {
 	defer c.Close()
-	remote := c.RemoteAddr().String()
-	s.log.Info("tcp: connection opened", "remote", remote)
-	defer s.log.Info("tcp: connection closed", "remote", remote)
+	log := s.log.With("remote", c.RemoteAddr().String())
+	log.Info("tcp: connection opened")
+	defer log.Info("tcp: connection closed")
 
 	dec := s.decoder()
+	imeiTagged := false
 	for {
 		// 5-minute idle timeout — trackers heartbeat every ~2 mins by default.
 		_ = c.SetReadDeadline(time.Now().Add(5 * time.Minute))
 
 		frame, err := dec.ReadFrame(ctx, c)
 		if err != nil {
-			s.log.Info("tcp: read ended", "remote", remote, "err", err)
+			log.Info("tcp: read ended", "err", err)
 			return
 		}
 
 		// Send ACK back if the protocol wants one.
 		if len(frame.Ack) > 0 {
 			if _, werr := c.Write(frame.Ack); werr != nil {
-				s.log.Error("tcp: write ack", "err", werr)
+				log.Error("tcp: write ack", "err", werr)
 				return
 			}
 		}
@@ -86,6 +87,10 @@ func (s *Server) handle(ctx context.Context, c net.Conn) {
 		// Publish positions onto the bus for downstream consumers.
 		if frame.Kind == protocol.FramePosition && frame.Position != nil {
 			frame.Position.IMEI = frame.IMEI
+			if !imeiTagged && frame.IMEI != "" {
+				log = log.With("imei", frame.IMEI)
+				imeiTagged = true
+			}
 			s.bus.Publish(*frame.Position)
 		}
 

@@ -31,7 +31,9 @@ export function LoginScreen() {
       setBusy(true);
       const c = await auth().signInWithPhoneNumber('+91' + phone.replace(/\D/g, ''));
       setConfirm(c);
-    } catch (err) {
+    } catch (err: any) {
+      console.error('[OTP Error]', JSON.stringify(err, null, 2));
+      console.error('[OTP Error] code:', err?.code, 'message:', err?.message);
       Alert.alert('Could not send OTP', String((err as Error).message ?? err));
     } finally {
       setBusy(false);

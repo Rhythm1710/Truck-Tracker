@@ -2,6 +2,8 @@
 package config
 
 import (
+	"log/slog"
+	"strings"
 	"time"
 
 	"github.com/kelseyhightower/envconfig"
@@ -19,6 +21,15 @@ type Config struct {
 	AppJWTTTL    time.Duration `envconfig:"APP_JWT_TTL"    default:"24h"`
 
 	LogLevel string `envconfig:"LOG_LEVEL" default:"info"`
+}
+
+// SlogLevel converts the LogLevel string to a slog.Level, defaulting to Info.
+func (c Config) SlogLevel() slog.Level {
+	var l slog.Level
+	if err := l.UnmarshalText([]byte(strings.ToUpper(c.LogLevel))); err != nil {
+		return slog.LevelInfo
+	}
+	return l
 }
 
 // Load reads environment variables and returns a populated Config.

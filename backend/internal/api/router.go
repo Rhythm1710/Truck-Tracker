@@ -33,6 +33,7 @@ func NewRouter(d Deps) http.Handler {
 
 	r.Use(chim.RequestID)
 	r.Use(chim.RealIP)
+	r.Use(middleware.RequestLogger(d.Log))
 	r.Use(chim.Recoverer)
 	r.Use(chim.Timeout(30 * time.Second))
 	r.Use(cors.Handler(cors.Options{
@@ -80,6 +81,7 @@ type exchangeResp struct {
 
 func (d Deps) exchangeHandler() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		log := middleware.LogFrom(r.Context())
 		var body exchangeReq
 		if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body.FirebaseIDToken == "" {
 			writeErr(w, http.StatusBadRequest, "missing firebaseIdToken")
@@ -88,14 +90,14 @@ func (d Deps) exchangeHandler() http.HandlerFunc {
 
 		phone, err := d.Firebase.VerifyIDToken(r.Context(), body.FirebaseIDToken)
 		if err != nil {
-			d.Log.Warn("auth: firebase verify failed", "err", err)
+			log.Warn("auth: firebase verify failed", "err", err)
 			writeErr(w, http.StatusUnauthorized, "invalid firebase token")
 			return
 		}
 
 		uid, err := d.Store.EnsureUserByPhone(r.Context(), phone)
 		if err != nil {
-			d.Log.Error("auth: ensure user", "err", err)
+			log.Error("auth: ensure user", "err", err)
 			writeErr(w, http.StatusInternalServerError, "internal")
 			return
 		}
@@ -116,10 +118,11 @@ func (d Deps) exchangeHandler() http.HandlerFunc {
 
 func (d Deps) listTrucksHandler() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		log := middleware.LogFrom(r.Context())
 		claims, _ := middleware.ClaimsFrom(r.Context())
 		trucks, err := d.Store.ListTrucks(r.Context(), claims.UserID)
 		if err != nil {
-			d.Log.Error("api: list trucks", "err", err)
+			log.Error("api: list trucks", "err", err)
 			writeErr(w, http.StatusInternalServerError, "internal")
 			return
 		}
@@ -129,6 +132,7 @@ func (d Deps) listTrucksHandler() http.HandlerFunc {
 
 func (d Deps) getTruckHandler() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		log := middleware.LogFrom(r.Context())
 		claims, _ := middleware.ClaimsFrom(r.Context())
 		id := chi.URLParam(r, "id")
 		if id == "" {
@@ -141,7 +145,7 @@ func (d Deps) getTruckHandler() http.HandlerFunc {
 			return
 		}
 		if err != nil {
-			d.Log.Error("api: get truck", "id", id, "err", err)
+			log.Error("api: get truck", "id", id, "err", err)
 			writeErr(w, http.StatusInternalServerError, "internal")
 			return
 		}
@@ -153,6 +157,7 @@ func (d Deps) getTruckHandler() http.HandlerFunc {
 // Defaults: from = now-24h, to = now, limit = 1000 (capped at 5000 in store).
 func (d Deps) historyHandler() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		log := middleware.LogFrom(r.Context())
 		claims, _ := middleware.ClaimsFrom(r.Context())
 		id := chi.URLParam(r, "id")
 		if id == "" {
@@ -171,7 +176,7 @@ func (d Deps) historyHandler() http.HandlerFunc {
 
 		positions, err := d.Store.ListPositionHistory(r.Context(), claims.UserID, id, from, to, limit)
 		if err != nil {
-			d.Log.Error("api: history", "id", id, "err", err)
+			log.Error("api: history", "id", id, "err", err)
 			writeErr(w, http.StatusInternalServerError, "internal")
 			return
 		}

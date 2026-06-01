@@ -2,6 +2,7 @@
 backend/.env
 backend/firebase-service-account.json
 mobile/.env
+mobile/src/lib/env.ts
 mobile/src/lib/env.ts.local
 
 # --- iOS / Android Firebase artifacts (treat as secrets) ---
@@ -24,6 +25,10 @@ mobile/ios/Pods/
 mobile/ios/build/
 mobile/ios/*.xcworkspace/xcuserdata/
 mobile/ios/*.xcodeproj/xcuserdata/
+mobile/ios/.xcode.env.local
+mobile/ios/**/app[0-9]*/
+mobile/ios/app[0-9]*/
+mobile/ios/GoogleService-Info\ *.plist
 
 # --- Android build output ---
 mobile/android/.gradle/

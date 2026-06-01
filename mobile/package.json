@@ -18,16 +18,16 @@
     "@react-navigation/native-stack": "^7.16.0",
     "@tanstack/react-query": "^5.100.14",
     "mappls-map-react-native": "^2.0.2",
-    "react": "19.2.6",
+    "react": "^19.2.3",
     "react-native": "0.85.3",
     "react-native-safe-area-context": "^5.8.0",
     "react-native-screens": "^4.25.2",
     "zustand": "^5.0.14"
   },
   "devDependencies": {
-    "@react-native-community/cli": "^20.1.3",
     "@babel/core": "^7.29.7",
     "@babel/preset-env": "^7.29.7",
+    "@react-native-community/cli": "^20.1.3",
     "@react-native/babel-preset": "0.85.3",
     "@react-native/eslint-config": "0.85.3",
     "@react-native/metro-config": "0.85.3",
@@ -38,7 +38,7 @@
     "eslint": "^9.39.4",
     "jest": "^30.4.2",
     "prettier": "3.8.3",
-    "react-test-renderer": "19.2.6",
+    "react-test-renderer": "^19.2.3",
     "typescript": "6.0.3"
   },
   "engines": {

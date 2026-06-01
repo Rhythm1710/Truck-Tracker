@@ -36,13 +36,15 @@ import (
 )
 
 func main() {
-	log := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo}))
+	bootstrap := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo}))
 
 	cfg, err := config.Load()
 	if err != nil {
-		log.Error("config", "err", err)
+		bootstrap.Error("config", "err", err)
 		os.Exit(1)
 	}
+
+	log := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: cfg.SlogLevel()}))
 
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer cancel()

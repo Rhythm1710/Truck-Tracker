@@ -2,15 +2,17 @@
  * Home — list of trucks with status summary, live updates via WebSocket.
  */
 import React, { useMemo } from 'react';
-import { View, Text, ScrollView, StyleSheet, RefreshControl, ActivityIndicator } from 'react-native';
+import { View, Text, ScrollView, StyleSheet, RefreshControl, ActivityIndicator, Pressable, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useQuery } from '@tanstack/react-query';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
+import auth from '@react-native-firebase/auth';
 
 import type { RootStackParamList } from '../../App';
 import { listTrucks } from '../lib/api';
 import { statusFromPosition } from '../lib/types';
 import { useLivePositions } from '../hooks/useLivePositions';
+import { useAuthStore } from '../store/auth';
 import { TruckCard } from '../components/TruckCard';
 import { colors, fontSize, fontWeight, radius, spacing } from '../theme';
 
@@ -20,10 +22,28 @@ export function HomeScreen({ navigation }: Props) {
   // Live updates merge into the cache for this query key.
   useLivePositions();
 
+  const clearSession = useAuthStore((s) => s.clear);
+
   const { data: trucks, isLoading, refetch, isFetching } = useQuery({
     queryKey: ['trucks'],
     queryFn: listTrucks,
   });
+
+  function handleLogout() {
+    Alert.alert('Logout', 'Are you sure you want to sign out?', [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'Sign Out',
+        style: 'destructive',
+        onPress: async () => {
+          try {
+            await auth().signOut();
+          } catch {}
+          clearSession();
+        },
+      },
+    ]);
+  }
 
   const counts = useMemo(() => {
     const c = { running: 0, idle: 0, stopped: 0, offline: 0, total: 0 };
@@ -45,9 +65,9 @@ export function HomeScreen({ navigation }: Props) {
           <Text style={styles.greeting}>Namaste 🙏</Text>
           <Text style={styles.title}>My Trucks</Text>
         </View>
-        <View style={styles.avatar}>
+        <Pressable onPress={handleLogout} style={styles.avatar} hitSlop={8}>
           <Text style={styles.avatarText}>R</Text>
-        </View>
+        </Pressable>
       </View>
 
       <View style={styles.summary}>

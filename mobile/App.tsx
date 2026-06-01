@@ -14,6 +14,7 @@ import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 
+import auth from '@react-native-firebase/auth';
 import { LoginScreen } from './src/screens/Login';
 import { HomeScreen } from './src/screens/Home';
 import { TruckDetailScreen } from './src/screens/TruckDetail';
@@ -21,6 +22,10 @@ import { useAuthStore, hydrateAuth } from './src/store/auth';
 import { initMappls } from './src/lib/mappls';
 import { assertEnv } from './src/lib/env';
 import { colors } from './src/theme';
+
+if (__DEV__) {
+  auth().settings.appVerificationDisabledForTesting = true;
+}
 
 const queryClient = new QueryClient({
   defaultOptions: { queries: { staleTime: 30_000, retry: 1 } },

@@ -5,29 +5,33 @@
  * The Mappls RN SDK is loaded lazily (require) so the app still boots if the
  * native module isn't linked yet — `getMappls()` returns null in that case
  * and screens fall back to a placeholder view.
+ *
+ * On iOS the SDK reads credentials from bundled .i.olf/.i.conf license files,
+ * so the JS-level setMapSDKKey/etc. calls are not needed (and don't exist on
+ * the TurboModule). We still attempt them for Android compatibility.
  */
+import { Platform } from 'react-native';
 import { env } from './env';
 
-type MapplsModule = {
-  MapplsGL: {
-    setMapSDKKey: (k: string) => void;
-    setRestAPIKey: (k: string) => void;
-    setAtlasClientId: (k: string) => void;
-    setAtlasClientSecret: (k: string) => void;
-    MapView: React.ComponentType<any>;
-    Camera: React.ComponentType<any>;
-    PointAnnotation: React.ComponentType<any>;
-    UserLocation?: React.ComponentType<any>;
-  };
+type MapplsGL = {
+  setMapSDKKey?: (k: string) => void;
+  setRestAPIKey?: (k: string) => void;
+  setAtlasClientId?: (k: string) => void;
+  setAtlasClientSecret?: (k: string) => void;
+  MapView: React.ComponentType<any>;
+  Camera: React.ComponentType<any>;
+  PointAnnotation: React.ComponentType<any>;
+  UserLocation?: React.ComponentType<any>;
 };
 
-let cached: MapplsModule | null | undefined;
+let cached: MapplsGL | null | undefined;
 
-function load(): MapplsModule | null {
+function load(): MapplsGL | null {
   if (cached !== undefined) return cached;
   try {
     // eslint-disable-next-line @typescript-eslint/no-var-requires
-    cached = require('mappls-map-react-native');
+    const mod = require('mappls-map-react-native');
+    cached = mod.default ?? mod;
   } catch {
     cached = null;
   }
@@ -38,14 +42,20 @@ let initialized = false;
 
 export function initMappls(): boolean {
   if (initialized) return true;
-  const m = load();
-  if (!m) return false;
-  if (!env.MAPPLS_MAP_SDK_KEY) return false;
+  const gl = load();
+  if (!gl) return false;
   try {
-    m.MapplsGL.setMapSDKKey(env.MAPPLS_MAP_SDK_KEY);
-    m.MapplsGL.setRestAPIKey(env.MAPPLS_REST_API_KEY);
-    m.MapplsGL.setAtlasClientId(env.MAPPLS_CLIENT_ID);
-    m.MapplsGL.setAtlasClientSecret(env.MAPPLS_CLIENT_SECRET);
+    if (typeof gl.setMapSDKKey === 'function') {
+      gl.setMapSDKKey(env.MAPPLS_MAP_SDK_KEY);
+      gl.setRestAPIKey?.(env.MAPPLS_REST_API_KEY);
+      gl.setAtlasClientId?.(env.MAPPLS_CLIENT_ID);
+      gl.setAtlasClientSecret?.(env.MAPPLS_CLIENT_SECRET);
+    } else if (Platform.OS === 'ios') {
+      // iOS reads keys from bundled .i.olf / .i.conf license files
+    } else {
+      // eslint-disable-next-line no-console
+      console.warn('[mappls] setMapSDKKey not available — map may not authenticate');
+    }
     initialized = true;
     return true;
   } catch (err) {
@@ -55,9 +65,9 @@ export function initMappls(): boolean {
   }
 }
 
-export function getMappls(): MapplsModule['MapplsGL'] | null {
-  const m = load();
-  return m ? m.MapplsGL : null;
+export function getMappls(): MapplsGL | null {
+  const gl = load();
+  return gl ?? null;
 }
 
 export function isMapplsReady(): boolean {
