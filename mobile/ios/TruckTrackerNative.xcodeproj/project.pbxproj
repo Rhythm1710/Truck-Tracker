@@ -22,6 +22,7 @@
 		C30519F12FCDC2CB0081DFB0 /* app1780074734448i1980593416.i.conf in Resources */ = {isa = PBXBuildFile; fileRef = C30519EE2FCDC2CB0081DFB0 /* app1780074734448i1980593416.i.conf */; };
 		C30519F22FCDC2CB0081DFB0 /* app1780074734448i1980593416.i.olf in Resources */ = {isa = PBXBuildFile; fileRef = C30519EF2FCDC2CB0081DFB0 /* app1780074734448i1980593416.i.olf */; };
 		C30519F62FCDC3870081DFB0 /* GoogleService-Info.plist in Resources */ = {isa = PBXBuildFile; fileRef = C30519F52FCDC3870081DFB0 /* GoogleService-Info.plist */; };
+		C3D31E6E2FCDDAE300B1A174 /* client_844060836737-2mcprmtegitvqsmr90iod7b7el7gjls1.apps.googleusercontent.com.plist in Resources */ = {isa = PBXBuildFile; fileRef = C3D31E6D2FCDDAE300B1A174 /* client_844060836737-2mcprmtegitvqsmr90iod7b7el7gjls1.apps.googleusercontent.com.plist */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -37,6 +38,7 @@
 		C30519EE2FCDC2CB0081DFB0 /* app1780074734448i1980593416.i.conf */ = {isa = PBXFileReference; lastKnownFileType = file; path = app1780074734448i1980593416.i.conf; sourceTree = "<group>"; };
 		C30519EF2FCDC2CB0081DFB0 /* app1780074734448i1980593416.i.olf */ = {isa = PBXFileReference; lastKnownFileType = file; path = app1780074734448i1980593416.i.olf; sourceTree = "<group>"; };
 		C30519F52FCDC3870081DFB0 /* GoogleService-Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = "GoogleService-Info.plist"; sourceTree = "<group>"; };
+		C3D31E6D2FCDDAE300B1A174 /* client_844060836737-2mcprmtegitvqsmr90iod7b7el7gjls1.apps.googleusercontent.com.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = "client_844060836737-2mcprmtegitvqsmr90iod7b7el7gjls1.apps.googleusercontent.com.plist"; sourceTree = "<group>"; };
 		ED297162215061F000B7C4FE /* JavaScriptCore.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = JavaScriptCore.framework; path = System/Library/Frameworks/JavaScriptCore.framework; sourceTree = SDKROOT; };
 /* End PBXFileReference section */
 
@@ -62,6 +64,7 @@
 		13B07FAE1A68108700A75B9A /* TruckTrackerNative */ = {
 			isa = PBXGroup;
 			children = (
+				C3D31E6D2FCDDAE300B1A174 /* client_844060836737-2mcprmtegitvqsmr90iod7b7el7gjls1.apps.googleusercontent.com.plist */,
 				C30519F52FCDC3870081DFB0 /* GoogleService-Info.plist */,
 				C30519F02FCDC2CB0081DFB0 /* app1780074734448i1980593416 2 */,
 				13B07FB51A68108700A75B9A /* Images.xcassets */,
@@ -210,6 +213,7 @@
 			files = (
 				81AB9BB82411601600AC10FF /* LaunchScreen.storyboard in Resources */,
 				C30519F62FCDC3870081DFB0 /* GoogleService-Info.plist in Resources */,
+				C3D31E6E2FCDDAE300B1A174 /* client_844060836737-2mcprmtegitvqsmr90iod7b7el7gjls1.apps.googleusercontent.com.plist in Resources */,
 				C30519F12FCDC2CB0081DFB0 /* app1780074734448i1980593416.i.conf in Resources */,
 				C30519F22FCDC2CB0081DFB0 /* app1780074734448i1980593416.i.olf in Resources */,
 				13B07FBF1A68108700A75B9A /* Images.xcassets in Resources */,

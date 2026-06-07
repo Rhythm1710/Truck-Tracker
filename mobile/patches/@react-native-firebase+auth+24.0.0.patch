@@ -1,0 +1,50 @@
+diff --git a/node_modules/@react-native-firebase/auth/ios/RNFBAuth/RNFBAuthModule.m b/node_modules/@react-native-firebase/auth/ios/RNFBAuth/RNFBAuthModule.m
+index 40ee9aa..1c9e2b0 100644
+--- a/node_modules/@react-native-firebase/auth/ios/RNFBAuth/RNFBAuthModule.m
++++ b/node_modules/@react-native-firebase/auth/ios/RNFBAuth/RNFBAuthModule.m
+@@ -61,6 +61,31 @@ static __strong NSMutableDictionary<NSString *, FIRMultiFactorSession *> *cached
+ static __strong NSMutableDictionary<NSString *, FIRTOTPSecret *> *cachedTotpSecrets;
+ #endif
+ 
++@interface RNFBAuthUIDelegate : NSObject <FIRAuthUIDelegate>
++@end
++
++@implementation RNFBAuthUIDelegate
++
++- (void)presentViewController:(UIViewController *)viewControllerToPresent
++                      animated:(BOOL)flag
++                    completion:(void (^)(void))completion {
++  UIViewController *root = RCTPresentedViewController();
++  if (root) {
++    [root presentViewController:viewControllerToPresent animated:flag completion:completion];
++  }
++}
++
++- (void)dismissViewControllerAnimated:(BOOL)flag completion:(void (^)(void))completion {
++  UIViewController *root = RCTPresentedViewController();
++  if (root) {
++    [root dismissViewControllerAnimated:flag completion:completion];
++  }
++}
++
++@end
++
++static RNFBAuthUIDelegate *_sharedUIDelegate = nil;
++
+ @implementation RNFBAuthModule
+ #pragma mark -
+ #pragma mark Module Setup
+@@ -847,9 +872,12 @@ RCT_EXPORT_METHOD(signInWithPhoneNumber
+                   : (RCTPromiseRejectBlock)reject) {
+   DLog(@"SignInWthPhoneNumber instance: %@", firebaseApp.name);
+ 
++  if (!_sharedUIDelegate) {
++    _sharedUIDelegate = [[RNFBAuthUIDelegate alloc] init];
++  }
+   [[FIRPhoneAuthProvider providerWithAuth:[FIRAuth authWithApp:firebaseApp]]
+       verifyPhoneNumber:phoneNumber
+-             UIDelegate:nil
++             UIDelegate:_sharedUIDelegate
+              completion:^(NSString *_Nullable verificationID, NSError *_Nullable error) {
+                if (error) {
+                  [self promiseRejectAuthException:reject error:error];

@@ -29,7 +29,7 @@
 	<key>NSAppTransportSecurity</key>
 	<dict>
 		<key>NSAllowsArbitraryLoads</key>
-		<false/>
+		<true/>
 		<key>NSAllowsLocalNetworking</key>
 		<true/>
 	</dict>
@@ -62,6 +62,12 @@
 			<key>CFBundleURLSchemes</key>
 			<array>
 				<string>app-1-844060836737-ios-d9e8a6226ae55efc159e80</string>
+			</array>
+		</dict>
+		<dict>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>com.googleusercontent.apps.844060836737-2mcprmtegitvqsmr90iod7b7el7gjls1</string>
 			</array>
 		</dict>
 	</array>
