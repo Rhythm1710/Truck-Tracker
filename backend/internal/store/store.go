@@ -154,7 +154,7 @@ func (s *Store) GetTruck(ctx context.Context, ownerID, deviceID string) (models.
 }
 
 // ListPositionHistory returns positions for a device in [from, to], capped at
-// `limit`. Caller must ownership-check via GetTruck first (or we re-check here).
+// `limit`. Ownership-checked inline.
 func (s *Store) ListPositionHistory(
 	ctx context.Context, ownerID, deviceID string,
 	from, to time.Time, limit int,
@@ -162,7 +162,6 @@ func (s *Store) ListPositionHistory(
 	if limit <= 0 || limit > 5000 {
 		limit = 1000
 	}
-	// Ownership check inline — one query, no extra round trip.
 	rows, err := s.pool.Query(ctx, `
 		SELECT p.lat, p.lng, p.speed_kmh, p.heading, p.ignition, p.device_at, p.recv_at
 		FROM positions p
@@ -181,15 +180,69 @@ func (s *Store) ListPositionHistory(
 	out := []models.Position{}
 	for rows.Next() {
 		var p models.Position
+		// speed_kmh/heading are REAL — scan into float32 then widen.
+		var spd, hdg float32
 		if err := rows.Scan(
-			&p.Lat, &p.Lng, &p.SpeedKmh, &p.Heading, &p.Ignition, &p.DeviceAt, &p.RecvAt,
+			&p.Lat, &p.Lng, &spd, &hdg, &p.Ignition, &p.DeviceAt, &p.RecvAt,
 		); err != nil {
 			return nil, err
 		}
+		p.SpeedKmh = float64(spd)
+		p.Heading = float64(hdg)
 		p.DeviceID = deviceID
 		out = append(out, p)
 	}
 	return out, rows.Err()
+}
+
+// ListUserDeviceIDs returns every device_id owned by user — used by the
+// WebSocket hub to filter broadcasts so users don't see other users' positions.
+func (s *Store) ListUserDeviceIDs(ctx context.Context, ownerID string) ([]string, error) {
+	rows, err := s.pool.Query(ctx, `SELECT id FROM devices WHERE owner_id = $1`, ownerID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		out = append(out, id)
+	}
+	return out, rows.Err()
+}
+
+// ResolveDeviceIDByIMEI returns the device UUID for an IMEI, or ErrNotFound.
+// Used by the TCP layer to resolve IMEI → DeviceID once at login.
+func (s *Store) ResolveDeviceIDByIMEI(ctx context.Context, imei string) (string, error) {
+	var id string
+	err := s.pool.QueryRow(ctx, `SELECT id FROM devices WHERE imei = $1`, imei).Scan(&id)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return "", ErrNotFound
+	}
+	return id, err
+}
+
+// OpenDeviceSession records a TCP connection start. Returns the new session_id
+// for the caller to pass to CloseDeviceSession on disconnect.
+func (s *Store) OpenDeviceSession(ctx context.Context, deviceID, ip string) (int64, error) {
+	var id int64
+	err := s.pool.QueryRow(ctx, `
+		INSERT INTO device_sessions (device_id, last_ip)
+		VALUES ($1, $2::inet)
+		RETURNING id`, deviceID, ip,
+	).Scan(&id)
+	return id, err
+}
+
+// CloseDeviceSession marks the session as ended.
+func (s *Store) CloseDeviceSession(ctx context.Context, sessionID int64) error {
+	_, err := s.pool.Exec(ctx,
+		`UPDATE device_sessions SET disconnected_at = NOW() WHERE id = $1`, sessionID,
+	)
+	return err
 }
 
 // ---------------------------------------------------------------------------
@@ -224,10 +277,15 @@ var getTruckSQL = `
 	WHERE d.owner_id = $1 AND d.id = $2`
 
 // scanTruckRow shares the row-scan logic between list & get.
+//
+// Column widths: speed_kmh / heading are REAL (float32) in the schema;
+// lat / lng are DOUBLE PRECISION (float64). pgx v5 is strict about width
+// matching — scanning REAL into *float64 errors. We scan into the right
+// width then widen when populating the model.
 func scanTruckRow(rows pgx.Rows, ownerID string) (models.TruckSummary, error) {
 	var t models.TruckSummary
 	var lat, lng *float64
-	var spd, hdg *float64
+	var spd, hdg *float32
 	var ign *bool
 	var dAt, rAt *time.Time
 	if err := rows.Scan(
@@ -241,7 +299,7 @@ func scanTruckRow(rows pgx.Rows, ownerID string) (models.TruckSummary, error) {
 		t.Latest = &models.Position{
 			DeviceID: t.Device.ID, IMEI: t.Device.IMEI,
 			Lat: *lat, Lng: *lng,
-			SpeedKmh: *spd, Heading: *hdg, Ignition: *ign,
+			SpeedKmh: float64(*spd), Heading: float64(*hdg), Ignition: *ign,
 			DeviceAt: *dAt, RecvAt: *rAt,
 		}
 	}

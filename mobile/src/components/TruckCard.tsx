@@ -1,45 +1,87 @@
 /**
- * Home screen truck card — matches the Figma design 1:1.
+ * Home screen truck card.
+ *
+ * Memoized: a card only re-renders when its truck's identity or `latest.at`
+ * actually changes. Lets Home stay smooth when one of 5 trucks moves but the
+ * others haven't reported.
  */
-import React from 'react';
-import { View, Text, Pressable, StyleSheet } from 'react-native';
+import React, { useEffect, useState } from 'react';
+import { View, Text, Pressable, StyleSheet, Platform } from 'react-native';
 
 import { StatusPill } from './StatusPill';
-import { colors, fontSize, fontWeight, radius, spacing } from '../theme';
+import { colors, fontSize, fontWeight, minTouchTarget, radius, spacing } from '../theme';
 import { statusFromPosition, formatRelativeTime } from '../lib/types';
 import type { TruckSummary } from '../lib/types';
+import { haptics } from '../lib/haptics';
 
 interface Props {
   truck: TruckSummary;
   onPress: () => void;
 }
 
-export function TruckCard({ truck, onPress }: Props) {
+function TruckCardImpl({ truck, onPress }: Props) {
   const { device, latest } = truck;
   const status = statusFromPosition(latest);
   const moving = status === 'Running';
   const speed = latest ? Math.round(latest.speed) : 0;
 
+  const handlePress = () => {
+    haptics.tap();
+    onPress();
+  };
+
   return (
-    <Pressable onPress={onPress} style={({ pressed }) => [styles.card, pressed && styles.cardPressed]}>
+    <Pressable
+      onPress={handlePress}
+      accessibilityRole="button"
+      accessibilityLabel={`${device.plate}, ${status}, ${speed} kilometers per hour, updated ${formatRelativeTime(latest?.at)}`}
+      accessibilityHint="Opens truck details with live map"
+      style={({ pressed }) => [
+        styles.card,
+        pressed && styles.cardPressed,
+        { minHeight: minTouchTarget * 1.5 },
+      ]}
+      android_ripple={{ color: '#00000010' }}
+    >
       <View style={styles.topRow}>
-        <Text style={styles.plate}>{device.plate}</Text>
-        <StatusPill status={status} />
+        <Text style={styles.plate} maxFontSizeMultiplier={1.3}>{device.plate}</Text>
+        <StatusPill status={status} compact />
       </View>
       <View style={styles.bottomRow}>
         <View style={styles.metaItem}>
-          <Text style={styles.icon}>{moving ? '💨' : '⏸'}</Text>
-          <Text style={styles.metaValue}>{speed} km/h</Text>
+          <Text style={styles.icon} maxFontSizeMultiplier={1}>{moving ? '💨' : '⏸'}</Text>
+          <Text style={styles.metaValue} maxFontSizeMultiplier={1.3}>{speed} km/h</Text>
         </View>
         <View style={{ flex: 1 }} />
         <View style={styles.metaItem}>
-          <Text style={styles.icon}>🕐</Text>
-          <Text style={styles.metaTime}>{formatRelativeTime(latest?.at)}</Text>
+          <Text style={styles.icon} maxFontSizeMultiplier={1}>🕐</Text>
+          <RelativeTime iso={latest?.at} style={styles.metaTime} />
         </View>
       </View>
     </Pressable>
   );
 }
+
+function RelativeTime({ iso, style }: { iso?: string; style?: object }) {
+  const [, tick] = useState(0);
+  useEffect(() => {
+    const id = setInterval(() => tick(n => n + 1), 30_000);
+    return () => clearInterval(id);
+  }, []);
+  return <Text style={style} maxFontSizeMultiplier={1.3}>{formatRelativeTime(iso)}</Text>;
+}
+
+/** Re-render only when the data the card displays actually changes. */
+export const TruckCard = React.memo(TruckCardImpl, (prev: Props, next: Props) => {
+  return (
+    prev.truck.device.id === next.truck.device.id &&
+    prev.truck.device.plate === next.truck.device.plate &&
+    prev.truck.latest?.at === next.truck.latest?.at &&
+    prev.truck.latest?.speed === next.truck.latest?.speed &&
+    prev.truck.latest?.ignition === next.truck.latest?.ignition &&
+    prev.onPress === next.onPress
+  );
+});
 
 const styles = StyleSheet.create({
   card: {
@@ -49,14 +91,19 @@ const styles = StyleSheet.create({
     paddingVertical: spacing.lg + 2,
     borderWidth: 1,
     borderColor: colors.border,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.04,
-    shadowRadius: 6,
-    elevation: 1,
+    ...Platform.select({
+      ios: {
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.04,
+        shadowRadius: 6,
+      },
+      android: { elevation: 1 },
+    }),
     gap: spacing.md,
+    overflow: 'hidden', // keeps android_ripple inside the rounded corners
   },
-  cardPressed: { opacity: 0.85 },
+  cardPressed: { transform: [{ scale: 0.99 }] },
   topRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
   bottomRow: { flexDirection: 'row', alignItems: 'center' },
   plate: { fontSize: fontSize.title, fontWeight: fontWeight.bold, color: colors.textPrimary },

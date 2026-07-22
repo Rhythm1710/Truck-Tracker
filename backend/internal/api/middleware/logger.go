@@ -1,8 +1,10 @@
 package middleware
 
 import (
+	"bufio"
 	"context"
 	"log/slog"
+	"net"
 	"net/http"
 	"time"
 
@@ -46,6 +48,15 @@ func (rw *responseWriter) Write(b []byte) (int, error) {
 	return rw.ResponseWriter.Write(b)
 }
 
+// Hijack forwards to the underlying ResponseWriter so WebSocket upgrades work.
+func (rw *responseWriter) Hijack() (net.Conn, *bufio.ReadWriter, error) {
+	h, ok := rw.ResponseWriter.(http.Hijacker)
+	if !ok {
+		return nil, nil, http.ErrNotSupported
+	}
+	return h.Hijack()
+}
+
 // RequestLogger logs one structured line per request: method, path, status,
 // latency_ms, req_id. It also puts a req_id-tagged logger on the context so
 // handlers can call LogFrom(r.Context()) for correlated log lines.
@@ -59,10 +70,18 @@ func RequestLogger(log *slog.Logger) func(http.Handler) http.Handler {
 			reqLog := log.With("req_id", reqID)
 			r = r.WithContext(WithLogger(r.Context(), reqLog))
 
+			// Echo the request id in the response so clients can quote it in
+			// bug reports / support tickets.
+			if reqID != "" {
+				w.Header().Set("X-Request-Id", reqID)
+			}
+
 			rw := &responseWriter{ResponseWriter: w, status: http.StatusOK}
 			next.ServeHTTP(rw, r)
 
-			reqLog.Info("http",
+			// LogFrom(r.Context()) here picks up any enrichment that downstream
+			// middlewares (like RequireAuth → user_id) added.
+			LogFrom(r.Context()).Info("http",
 				"method", r.Method,
 				"path", r.URL.Path,
 				"status", rw.status,

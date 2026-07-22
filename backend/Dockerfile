@@ -11,4 +11,6 @@ FROM gcr.io/distroless/static-debian12
 COPY --from=build /out/server /server
 COPY migrations /migrations
 EXPOSE 8080 5023
+# distroless has no shell/curl — orchestrators (k8s, fly.io, docker-compose
+# with a sidecar) should hit GET http://<host>:8080/healthz directly.
 ENTRYPOINT ["/server"]

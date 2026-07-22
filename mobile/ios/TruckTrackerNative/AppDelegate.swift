@@ -18,10 +18,9 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
   ) -> Bool {
     FirebaseApp.configure()
 
-    #if targetEnvironment(simulator)
+    #if DEBUG
     Auth.auth().settings?.isAppVerificationDisabledForTesting = true
     #endif
-    application.registerForRemoteNotifications()
 
     let delegate = ReactNativeDelegate()
     let factory = RCTReactNativeFactory(delegate: delegate)
@@ -41,38 +40,6 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
     return true
   }
 
-  // Forward APNs token to Firebase Auth for silent push verification
-  func application(
-    _ application: UIApplication,
-    didRegisterForRemoteNotificationsWithDeviceToken deviceToken: Data
-  ) {
-    Auth.auth().setAPNSToken(deviceToken, type: .unknown)
-  }
-
-  // Handle incoming remote notifications for Firebase Auth
-  func application(
-    _ application: UIApplication,
-    didReceiveRemoteNotification userInfo: [AnyHashable: Any],
-    fetchCompletionHandler completionHandler: @escaping (UIBackgroundFetchResult) -> Void
-  ) {
-    if Auth.auth().canHandleNotification(userInfo) {
-      completionHandler(.noData)
-      return
-    }
-    completionHandler(.noData)
-  }
-
-  // Handle URL callback for reCAPTCHA fallback
-  func application(
-    _ app: UIApplication,
-    open url: URL,
-    options: [UIApplication.OpenURLOptionsKey: Any] = [:]
-  ) -> Bool {
-    if Auth.auth().canHandle(url) {
-      return true
-    }
-    return false
-  }
 }
 
 class ReactNativeDelegate: RCTDefaultReactNativeFactoryDelegate {
@@ -86,7 +53,7 @@ class ReactNativeDelegate: RCTDefaultReactNativeFactoryDelegate {
     RCTBundleURLProvider.sharedSettings().jsBundleURL(forBundleRoot: "index")
     #else
     // Physical device — point to Mac's LAN IP so Metro is reachable.
-    RCTBundleURLProvider.sharedSettings().jsLocation = "192.168.1.76"
+    RCTBundleURLProvider.sharedSettings().jsLocation = "MacBook-Pro.local"
     return RCTBundleURLProvider.sharedSettings().jsBundleURL(forBundleRoot: "index")
     #endif
 #else

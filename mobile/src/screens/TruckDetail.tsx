@@ -5,7 +5,7 @@
  * If the Mappls SDK isn't installed or keys are missing, falls back to a
  * neutral green tile so the rest of the UI still works during dev.
  */
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState, useReducer } from 'react';
 import { View, Text, Pressable, StyleSheet, ActivityIndicator } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useQuery } from '@tanstack/react-query';
@@ -17,7 +17,8 @@ import { statusFromPosition, formatRelativeTime } from '../lib/types';
 import { useLivePositions } from '../hooks/useLivePositions';
 import { getMappls, isMapplsReady } from '../lib/mappls';
 import { StatusPill } from '../components/StatusPill';
-import { colors, fontSize, fontWeight, radius, spacing } from '../theme';
+import { colors, fontSize, fontWeight, minTouchTarget, radius, spacing } from '../theme';
+import { haptics } from '../lib/haptics';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'TruckDetail'>;
 
@@ -30,6 +31,13 @@ export function TruckDetailScreen({ route, navigation }: Props) {
 
   useLivePositions();
 
+  // Tick every 30s so relative timestamps ("2 min ago") stay current.
+  const [, tick] = useReducer(n => n + 1, 0);
+  useEffect(() => {
+    const id = setInterval(tick, 30_000);
+    return () => clearInterval(id);
+  }, []);
+
   const { data: truck, isLoading } = useQuery({
     queryKey: ['truck', truckId],
     queryFn: () => getTruck(truckId),
@@ -38,23 +46,33 @@ export function TruckDetailScreen({ route, navigation }: Props) {
 
   const status = statusFromPosition(truck?.latest);
 
-  const coords: [number, number] | null = truck?.latest
-    ? [truck.latest.lng, truck.latest.lat]
-    : null;
+  // Pass lat/lng as primitives so the Map's useEffect doesn't re-run when
+  // the parent re-renders with a fresh array reference.
+  const lat = truck?.latest?.lat;
+  const lng = truck?.latest?.lng;
+  const heading = truck?.latest?.heading ?? 0;
+  const speed = truck?.latest?.speed ?? 0;
 
   return (
     <View style={styles.root}>
-      <Map coords={coords} />
+      <Map lat={lat} lng={lng} heading={heading} moving={speed > 5} />
 
       {/* TOP BAR */}
       <SafeAreaView edges={['top']} style={styles.topBarWrap} pointerEvents="box-none">
         <View style={styles.topBar}>
-          <Pressable onPress={() => navigation.goBack()} style={styles.backBtn} hitSlop={8}>
-            <Text style={styles.backArrow}>←</Text>
+          <Pressable
+            onPress={() => { haptics.tap(); navigation.goBack(); }}
+            style={({ pressed }) => [styles.backBtn, pressed && { opacity: 0.7 }]}
+            hitSlop={12}
+            accessibilityRole="button"
+            accessibilityLabel="Back to trucks list"
+            android_ripple={{ color: '#00000020', borderless: true }}
+          >
+            <Text style={styles.backArrow} maxFontSizeMultiplier={1.3}>←</Text>
           </Pressable>
           <View style={{ flex: 1 }}>
-            <Text style={styles.topPlate}>{plate}</Text>
-            <Text style={styles.topSub} numberOfLines={1}>
+            <Text style={styles.topPlate} maxFontSizeMultiplier={1.3}>{plate}</Text>
+            <Text style={styles.topSub} numberOfLines={1} maxFontSizeMultiplier={1.4}>
               {truck?.latest
                 ? `${truck.latest.lat.toFixed(4)}, ${truck.latest.lng.toFixed(4)}`
                 : 'Waiting for first position…'}
@@ -101,17 +119,25 @@ export function TruckDetailScreen({ route, navigation }: Props) {
 // and screen-level state (sheet, top bar) is independent of map readiness.
 // ---------------------------------------------------------------------------
 
-function Map({ coords }: { coords: [number, number] | null }) {
+interface MapProps {
+  lat?: number;
+  lng?: number;
+  heading: number;   // degrees, 0 = north
+  moving: boolean;   // suppress rotation jitter at standstill
+}
+
+function Map({ lat, lng, heading, moving }: MapProps) {
   const Mappls = getMappls();
   const cameraRef = useRef<any>(null);
   const [followLive, setFollowLive] = useState(true);
 
-  // Animate the camera whenever a new coord lands AND we're in follow mode.
+  // Animate the camera ONLY when lat/lng actually change AND follow is on.
+  // Primitives in the dep list mean React.useEffect compares by value.
   useEffect(() => {
-    if (!coords || !followLive || !cameraRef.current) return;
+    if (lat == null || lng == null || !followLive || !cameraRef.current) return;
     try {
       cameraRef.current.setCamera({
-        centerCoordinate: coords,
+        centerCoordinate: [lng, lat],
         zoomLevel: DEFAULT_ZOOM,
         animationMode: 'flyTo',
         animationDuration: 800,
@@ -119,12 +145,20 @@ function Map({ coords }: { coords: [number, number] | null }) {
     } catch {
       /* SDK not ready or stub */
     }
-  }, [coords, followLive]);
+  }, [lat, lng, followLive]);
+
+  // User-gesture handler: disengage follow on pan/zoom so the map doesn't
+  // snap back when the next position update arrives.
+  const onRegionWillChange = useCallback((e: any) => {
+    if (e?.properties?.isUserInteraction) {
+      setFollowLive(false);
+    }
+  }, []);
 
   // No SDK / no keys → placeholder.
   if (!Mappls || !isMapplsReady()) {
     return (
-      <View style={[StyleSheet.absoluteFillObject, styles.mapFallback]}>
+      <View style={[StyleSheet.absoluteFill, styles.mapFallback]}>
         <Text style={styles.fallbackText}>
           Mappls SDK not configured.{'\n'}See mobile README.
         </Text>
@@ -133,20 +167,31 @@ function Map({ coords }: { coords: [number, number] | null }) {
   }
 
   const { MapView, Camera, PointAnnotation } = Mappls;
-  const center = coords ?? DEFAULT_CENTER;
+  const haveCoords = lat != null && lng != null;
+  const center: [number, number] = haveCoords ? [lng!, lat!] : DEFAULT_CENTER;
 
   return (
     <>
-      <MapView style={StyleSheet.absoluteFillObject} logoEnabled compassEnabled>
+      <MapView
+        style={StyleSheet.absoluteFill}
+        logoEnabled
+        compassEnabled
+        onRegionWillChange={onRegionWillChange}
+      >
         <Camera
           ref={cameraRef}
           defaultSettings={{ centerCoordinate: center, zoomLevel: DEFAULT_ZOOM }}
           animationMode="flyTo"
         />
-        {coords && (
-          <PointAnnotation id="truck" coordinate={coords}>
+        {haveCoords && (
+          <PointAnnotation id="truck" coordinate={[lng!, lat!]}>
             <View style={styles.markerWrap}>
-              <View style={styles.markerBubble}>
+              <View
+                style={[
+                  styles.markerBubble,
+                  moving && { transform: [{ rotate: `${heading}deg` }] },
+                ]}
+              >
                 <Text style={styles.markerEmoji}>🚚</Text>
               </View>
               <View style={styles.markerTail} />
@@ -155,11 +200,13 @@ function Map({ coords }: { coords: [number, number] | null }) {
         )}
       </MapView>
 
-      {/* Recenter / lock-follow toggle */}
+      {/* Recenter / re-engage live-follow */}
       <Pressable
         onPress={() => setFollowLive(true)}
         style={[styles.recenter, followLive && styles.recenterActive]}
         hitSlop={8}
+        accessibilityRole="button"
+        accessibilityLabel={followLive ? 'Live follow on' : 'Recenter map on truck'}
       >
         <Text style={styles.recenterIcon}>📍</Text>
       </Pressable>
@@ -196,7 +243,8 @@ const styles = StyleSheet.create({
     shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.08, shadowRadius: 8, elevation: 3,
   },
   backBtn: {
-    width: 40, height: 40, borderRadius: 999, backgroundColor: colors.surfaceAlt,
+    width: minTouchTarget, height: minTouchTarget,
+    borderRadius: 999, backgroundColor: colors.surfaceAlt,
     alignItems: 'center', justifyContent: 'center',
   },
   backArrow: { fontSize: 22, fontWeight: fontWeight.bold, color: colors.textPrimary },

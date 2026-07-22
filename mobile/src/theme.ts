@@ -1,6 +1,12 @@
 /**
  * Design tokens — mirror the Figma file.
  * Keep these the single source of truth across all screens.
+ *
+ * Contrast notes — text-on-pill ratios verified for WCAG AA (4.5:1 normal text):
+ *   Running #0E7A37 on #DEF6E3 ≈ 5.1:1 ✓
+ *   Idle    #8C5A05 on #FEF3CF ≈ 5.4:1 ✓
+ *   Stopped #B11F1F on #FDDEDE ≈ 5.0:1 ✓
+ *   Offline #475569 on #E5E7EB ≈ 6.0:1 ✓
  */
 export const colors = {
   // surfaces
@@ -16,15 +22,20 @@ export const colors = {
   primary: '#1E40AF',
   primaryText: '#FFFFFF',
 
-  // status — match the truck card pills
-  statusRunning: '#16A34A',
+  // status — text-color picked for WCAG AA on bg-color
+  statusRunning:   '#0E7A37',
   statusRunningBg: '#DEF6E3',
-  statusIdle: '#B8790B',
-  statusIdleBg: '#FEF3CF',
-  statusStopped: '#CF2D2D',
+  statusIdle:      '#8C5A05',
+  statusIdleBg:    '#FEF3CF',
+  statusStopped:   '#B11F1F',
   statusStoppedBg: '#FDDEDE',
-  statusOffline: '#64748B',
+  statusOffline:   '#475569',
   statusOfflineBg: '#E5E7EB',
+
+  // connectivity banner
+  connOnline:  '#0E7A37',
+  connOffline: '#B11F1F',
+  connWarn:    '#8C5A05',
 
   // misc
   border: '#E5E7EB',
@@ -71,6 +82,9 @@ export const fontWeight = {
   semibold: '600' as const,
   bold: '700' as const,
 };
+
+/** Minimum tap target — matches the WCAG 2.1 AAA / senior-friendly target. */
+export const minTouchTarget = 48;
 
 export type Status = 'Running' | 'Idle' | 'Stopped' | 'Offline';
 

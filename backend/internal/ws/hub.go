@@ -2,12 +2,15 @@
 // clients.
 //
 // Design:
-//   - Hub holds one record per connected client (userID + send channel).
-//   - A single fan-out goroutine reads from the Position Bus and writes the
-//     position to every client whose user owns that device. (For v1, with one
-//     user, every connected client gets every position — we'll add per-user
-//     filtering when we get multi-user.)
-//   - Each client also runs a read goroutine to detect disconnects.
+//   - One hub-side goroutine reads the Position Bus.
+//   - It marshals each Position once and fans the bytes out to every
+//     client whose owned-device set contains the position's DeviceID.
+//   - Each client has its own buffered send chan (capacity 64). A slow
+//     client drops messages for itself without blocking the hub.
+//   - Each client also has a read goroutine that detects disconnects.
+//   - The client's API token expiry is enforced server-side: when the
+//     token would expire, we close the socket — mobile reconnects with
+//     a refreshed token via /v1/auth/exchange.
 package ws
 
 import (
@@ -15,27 +18,53 @@ import (
 	"encoding/json"
 	"log/slog"
 	"net/http"
+	"sync"
 	"time"
 
 	"github.com/gorilla/websocket"
 
 	"github.com/rhythm/truck-tracker/internal/auth"
 	"github.com/rhythm/truck-tracker/internal/bus"
+	"github.com/rhythm/truck-tracker/internal/metrics"
 	"github.com/rhythm/truck-tracker/internal/models"
+	"github.com/rhythm/truck-tracker/internal/store"
 )
 
+const (
+	clientSendBuf   = 64
+	writeDeadline   = 10 * time.Second
+	pingInterval    = 30 * time.Second
+	pongWait        = 60 * time.Second
+	defaultMaxMsgSz = 4 * 1024
+)
+
+// ---------------------------------------------------------------------------
+// Hub
+// ---------------------------------------------------------------------------
+
 type Hub struct {
-	bus    *bus.Bus
-	secret string
-	log    *slog.Logger
-	up     websocket.Upgrader
+	bus     *bus.Bus
+	store   *store.Store
+	secret  string
+	log     *slog.Logger
+	metrics *metrics.Metrics
+
+	up websocket.Upgrader
+
+	clientsMu sync.RWMutex
+	clients   map[*client]struct{}
+
+	started sync.Once
 }
 
-func NewHub(b *bus.Bus, secret string, log *slog.Logger) *Hub {
+func NewHub(b *bus.Bus, secret string, log *slog.Logger, st *store.Store, m *metrics.Metrics) *Hub {
 	return &Hub{
-		bus:    b,
-		secret: secret,
-		log:    log,
+		bus:     b,
+		store:   st,
+		secret:  secret,
+		log:     log,
+		metrics: m,
+		clients: make(map[*client]struct{}),
 		up: websocket.Upgrader{
 			ReadBufferSize:  1024,
 			WriteBufferSize: 1024,
@@ -45,15 +74,73 @@ func NewHub(b *bus.Bus, secret string, log *slog.Logger) *Hub {
 	}
 }
 
-type outgoing struct {
-	Type string          `json:"type"`
-	Data models.Position `json:"data"`
+// startBusReader spins up the single fan-out goroutine, lazily on first
+// connect so empty deployments don't keep a goroutine around.
+func (h *Hub) startBusReader() {
+	h.started.Do(func() {
+		go h.busLoop()
+	})
 }
 
-// ServeHTTP handles GET /v1/live. Authenticates via Bearer token in the
-// `Sec-WebSocket-Protocol` header (since browsers can't set arbitrary headers).
+func (h *Hub) busLoop() {
+	sub, cancel := h.bus.Subscribe()
+	defer cancel()
+	for p := range sub {
+		payload, err := json.Marshal(outgoing{Type: "position", Data: p})
+		if err != nil {
+			h.log.Error("ws: marshal", "err", err)
+			continue
+		}
+		h.fanout(p.DeviceID, payload)
+	}
+}
+
+// fanout delivers payload to every client that owns the given deviceID.
+// Read-locked iteration; per-client send uses a non-blocking select.
+func (h *Hub) fanout(deviceID string, payload []byte) {
+	h.clientsMu.RLock()
+	defer h.clientsMu.RUnlock()
+	for c := range h.clients {
+		if _, ok := c.deviceIDs[deviceID]; !ok {
+			continue
+		}
+		select {
+		case c.send <- payload:
+		default:
+			// Client is slow. Don't block.
+			if h.metrics != nil {
+				h.metrics.WSDropTotal.Inc()
+			}
+		}
+	}
+}
+
+func (h *Hub) register(c *client) {
+	h.clientsMu.Lock()
+	h.clients[c] = struct{}{}
+	h.clientsMu.Unlock()
+	if h.metrics != nil {
+		h.metrics.WSClients.Inc()
+	}
+}
+
+func (h *Hub) unregister(c *client) {
+	h.clientsMu.Lock()
+	if _, ok := h.clients[c]; ok {
+		delete(h.clients, c)
+		close(c.send) // safe — only hub writes to c.send
+	}
+	h.clientsMu.Unlock()
+	if h.metrics != nil {
+		h.metrics.WSClients.Dec()
+	}
+}
+
+// ServeHTTP handles GET /v1/live.
+//
+// Auth: mobile passes the app token as a query param `?token=...` because
+// browsers can't set arbitrary headers on a WebSocket upgrade.
 func (h *Hub) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	// Mobile passes the app token as a query param `?token=...`.
 	token := r.URL.Query().Get("token")
 	claims, err := auth.Verify(h.secret, token)
 	if err != nil {
@@ -61,54 +148,109 @@ func (h *Hub) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	c, err := h.up.Upgrade(w, r, nil)
+	// Look up the devices this user owns so we can filter broadcasts.
+	deviceIDList, err := h.store.ListUserDeviceIDs(r.Context(), claims.UserID)
+	if err != nil {
+		h.log.Error("ws: list devices", "user", claims.UserID, "err", err)
+		http.Error(w, "internal", http.StatusInternalServerError)
+		return
+	}
+	deviceIDs := make(map[string]struct{}, len(deviceIDList))
+	for _, id := range deviceIDList {
+		deviceIDs[id] = struct{}{}
+	}
+
+	conn, err := h.up.Upgrade(w, r, nil)
 	if err != nil {
 		h.log.Error("ws: upgrade", "err", err)
 		return
 	}
-	defer c.Close()
 
-	h.log.Info("ws: client connected", "user", claims.UserID)
+	h.startBusReader()
+
+	c := &client{
+		conn:      conn,
+		send:      make(chan []byte, clientSendBuf),
+		deviceIDs: deviceIDs,
+		userID:    claims.UserID,
+	}
+	h.register(c)
+	defer h.unregister(c)
+	defer conn.Close()
+
+	h.log.Info("ws: client connected", "user", claims.UserID, "devices", len(deviceIDs))
 	defer h.log.Info("ws: client disconnected", "user", claims.UserID)
 
-	// Subscribe to the position bus.
-	sub, cancel := h.bus.Subscribe()
-	defer cancel()
+	// Pong handler keeps the read loop alive.
+	conn.SetReadLimit(defaultMaxMsgSz)
+	_ = conn.SetReadDeadline(time.Now().Add(pongWait))
+	conn.SetPongHandler(func(string) error {
+		_ = conn.SetReadDeadline(time.Now().Add(pongWait))
+		return nil
+	})
 
-	// Read loop — detect disconnect / pong messages.
-	closed := make(chan struct{})
-	go func() {
-		defer close(closed)
-		for {
-			if _, _, err := c.NextReader(); err != nil {
-				return
-			}
+	// Enforce token expiry — when the token would expire, close the socket
+	// so the mobile client refreshes and reconnects.
+	ttl := time.Until(time.Unix(claims.ExpiresAt, 0))
+	if ttl > 0 {
+		t := time.AfterFunc(ttl, func() {
+			h.log.Info("ws: token expired, closing", "user", claims.UserID)
+			_ = conn.Close()
+		})
+		defer t.Stop()
+	}
+
+	go c.readLoop()
+	c.writeLoop(h.metrics)
+}
+
+// ---------------------------------------------------------------------------
+// client
+// ---------------------------------------------------------------------------
+
+type outgoing struct {
+	Type string          `json:"type"`
+	Data models.Position `json:"data"`
+}
+
+type client struct {
+	conn      *websocket.Conn
+	send      chan []byte
+	deviceIDs map[string]struct{}
+	userID    string
+}
+
+// readLoop discards inbound frames (we don't expect any) but maintains
+// the read deadline via PongHandler. Returns on any error → triggers
+// writeLoop teardown via send chan close.
+func (c *client) readLoop() {
+	for {
+		if _, _, err := c.conn.NextReader(); err != nil {
+			return
 		}
-	}()
+	}
+}
 
-	// Ping every 30s.
-	pingT := time.NewTicker(30 * time.Second)
+func (c *client) writeLoop(m *metrics.Metrics) {
+	pingT := time.NewTicker(pingInterval)
 	defer pingT.Stop()
 
 	for {
 		select {
-		case <-closed:
-			return
-		case <-r.Context().Done():
-			return
-		case <-pingT.C:
-			_ = c.SetWriteDeadline(time.Now().Add(10 * time.Second))
-			if err := c.WriteMessage(websocket.PingMessage, nil); err != nil {
-				return
-			}
-		case p, ok := <-sub:
+		case payload, ok := <-c.send:
 			if !ok {
 				return
 			}
-			// TODO: filter — only send positions for trucks this user owns.
-			payload, _ := json.Marshal(outgoing{Type: "position", Data: p})
-			_ = c.SetWriteDeadline(time.Now().Add(10 * time.Second))
-			if err := c.WriteMessage(websocket.TextMessage, payload); err != nil {
+			_ = c.conn.SetWriteDeadline(time.Now().Add(writeDeadline))
+			if err := c.conn.WriteMessage(websocket.TextMessage, payload); err != nil {
+				return
+			}
+			if m != nil {
+				m.WSMessages.Inc()
+			}
+		case <-pingT.C:
+			_ = c.conn.SetWriteDeadline(time.Now().Add(writeDeadline))
+			if err := c.conn.WriteMessage(websocket.PingMessage, nil); err != nil {
 				return
 			}
 		}
@@ -116,8 +258,7 @@ func (h *Hub) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 // SubscribeBus starts the store-side subscriber: reads from the bus and
-// returns a function to call inside the main goroutine for store writes.
-// Wired up in main.go.
+// calls onPos for every position. Wired up in main.go.
 func SubscribeBus(ctx context.Context, b *bus.Bus, onPos func(models.Position)) {
 	sub, cancel := b.Subscribe()
 	defer cancel()

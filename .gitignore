@@ -7,6 +7,7 @@ mobile/src/lib/env.ts.local
 
 # --- iOS / Android Firebase artifacts (treat as secrets) ---
 mobile/ios/GoogleService-Info.plist
+mobile/ios/client_*.apps.googleusercontent.com.plist
 mobile/android/app/google-services.json
 
 # --- Go build output ---
