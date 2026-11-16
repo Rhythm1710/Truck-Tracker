@@ -2,7 +2,6 @@
 backend/.env
 backend/firebase-service-account.json
 mobile/.env
-mobile/src/lib/env.ts
 mobile/src/lib/env.ts.local
 
 # --- iOS / Android Firebase artifacts (treat as secrets) ---
@@ -36,6 +35,7 @@ mobile/android/.gradle/
 mobile/android/build/
 mobile/android/app/build/
 mobile/android/local.properties
+mobile/android/app/debug.keystore
 
 # --- IDE ---
 .vscode/

@@ -13,15 +13,20 @@ src/
     Home.tsx                  # truck cards + live status pills
     TruckDetail.tsx           # Mappls map + bottom info sheet
   components/
+    OTPInput.tsx              # 6-cell OTP entry
     StatusPill.tsx            # Running / Idle / Stopped / Offline
     TruckCard.tsx             # the home-screen truck row
   hooks/
     useLivePositions.ts       # WebSocket subscriber → react-query cache
   lib/
     api.ts                    # typed REST client
+    phone.ts                  # Indian 10-digit phone formatting
     types.ts                  # shared API types (mirror backend models)
+    mappls.ts                 # Mappls SDK init, with a safe fallback
+    haptics.ts
+    LiveProvider.tsx          # one WebSocket for the whole app
   store/
-    auth.ts                   # Zustand store for apiToken + phone
+    auth.ts                   # Zustand session, persisted with AsyncStorage
   theme.ts                    # colors, spacing, type scale
 ```
 
@@ -45,13 +50,21 @@ npm run pods
 #    Place keys in ios/Info.plist + android/.../strings.xml per Mappls docs.
 #    Or stub `mappls-map-react-native` for dev (we already do safely).
 
-# 5. Env
-echo "EXPO_PUBLIC_API_BASE=http://10.0.2.2:8080" > .env
-# 10.0.2.2 = host loopback on Android emulator
-# Use http://localhost:8080 on iOS simulator
-# Use http://<your-mac-LAN-ip>:8080 on a physical device
+# 5. Runtime config
+#    src/lib/env.ts holds API_BASE and the Mappls keys.
+#    Empty placeholders are in git. Put real Mappls keys there locally
+#    and do not commit them.
+#    API_BASE:
+#      Android emulator   → http://10.0.2.2:8080
+#      iOS simulator      → http://localhost:8080
+#      Physical device    → http://<your-mac-LAN-ip>:8080
 
-# 6. Run
+# 6. Android debug keystore (not in git)
+keytool -genkeypair -keystore android/app/debug.keystore -storepass android \
+  -alias androiddebugkey -keypass android -keyalg RSA -keysize 2048 -validity 10000 \
+  -dname "CN=Android Debug,O=Android,C=US"
+
+# 7. Run
 npm run android    # or
 npm run ios
 ```
@@ -63,22 +76,33 @@ npm run ios
 3. User enters 6-digit code → Firebase returns a Firebase ID token.
 4. App POSTs the ID token to `/v1/auth/exchange`; backend verifies it,
    returns an `apiToken` (HMAC-signed, 24h TTL).
-5. App stores `apiToken` in Zustand and sends it as `Authorization: Bearer ...`
-   on every REST call, and as `?token=...` on the WebSocket URL.
+5. App stores `apiToken`, phone, and expiry in the Zustand auth store.
+   `setSession` writes that blob to AsyncStorage (`@truck-tracker/auth/v1`).
+   `hydrateAuth()` runs before the navigator mounts, so a still-valid session
+   opens Home instead of Login. REST calls send `Authorization: Bearer ...`,
+   and the WebSocket URL sends `?token=...`.
 
 ## Live updates
 
-`useLivePositions()` opens a WebSocket to `/v1/live`. Every incoming
-`{ type: "position" }` message is patched into the `['trucks']` and
-`['truck', id]` react-query caches — components re-render automatically.
+`LiveProvider` opens one WebSocket to `/v1/live` for the signed-in app.
+Every incoming `{ type: "position" }` message is patched into the
+`['trucks']` and `['truck', id]` react-query caches — components re-render
+automatically. `useLivePositions()` is a thin wrapper around that provider.
 
 If the connection drops, it reconnects with exponential backoff capped at 30s.
+The socket closes while the app is in the background and reopens when it
+becomes active.
 
-## What's stubbed
+## Session persistence
 
-- **AsyncStorage persistence** in `src/store/auth.ts`. Currently the session
-  is in-memory only — the user has to log in again after killing the app.
-  Add `@react-native-async-storage/async-storage` and rehydrate on launch.
-- **Mappls MapView** falls back to a soft-green `<View />` if the SDK isn't
-  installed/configured. Configure keys and remove the try/catch.
-- **No history screen yet** — design only has 3 screens for v1.
+Implemented in `src/store/auth.ts` with `@react-native-async-storage/async-storage`.
+The store itself is synchronous. `hydrateAuth()` reads AsyncStorage once at
+launch and is awaited before the navigator renders, so a saved session does
+not flash the Login screen. An expired token or a corrupt blob is dropped
+and the user signs in again.
+
+## What's not built yet
+
+- **Mappls MapView** falls back to a soft-green placeholder if the SDK isn't
+  installed or keys are missing.
+- **No history screen yet** — v1 is Login, Home, and Truck Detail.
