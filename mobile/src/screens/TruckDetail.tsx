@@ -6,8 +6,8 @@
  * neutral green tile so the rest of the UI still works during dev.
  */
 import React, { useCallback, useEffect, useRef, useState, useReducer } from 'react';
-import { View, Text, Pressable, StyleSheet, ActivityIndicator } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { View, Text, Pressable, StyleSheet, ActivityIndicator, type LayoutChangeEvent } from 'react-native';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useQuery } from '@tanstack/react-query';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 
@@ -28,6 +28,8 @@ const DEFAULT_ZOOM = 14;
 
 export function TruckDetailScreen({ route, navigation }: Props) {
   const { truckId, plate } = route.params;
+  const insets = useSafeAreaInsets();
+  const [sheetHeight, setSheetHeight] = useState(0);
 
   useLivePositions();
 
@@ -53,9 +55,20 @@ export function TruckDetailScreen({ route, navigation }: Props) {
   const heading = truck?.latest?.heading ?? 0;
   const speed = truck?.latest?.speed ?? 0;
 
+  const onSheetLayout = useCallback((e: LayoutChangeEvent) => {
+    const next = e.nativeEvent.layout.height;
+    setSheetHeight(prev => (prev === next ? prev : next));
+  }, []);
+
   return (
     <View style={styles.root}>
-      <Map lat={lat} lng={lng} heading={heading} moving={speed > 5} />
+      <Map
+        lat={lat}
+        lng={lng}
+        heading={heading}
+        moving={speed > 5}
+        fabBottom={sheetHeight > 0 ? sheetHeight + spacing.md : null}
+      />
 
       {/* TOP BAR */}
       <SafeAreaView edges={['top']} style={styles.topBarWrap} pointerEvents="box-none">
@@ -82,7 +95,10 @@ export function TruckDetailScreen({ route, navigation }: Props) {
       </SafeAreaView>
 
       {/* BOTTOM SHEET */}
-      <View style={styles.sheet}>
+      <View
+        style={[styles.sheet, { paddingBottom: spacing['2xl'] + spacing.sm + insets.bottom }]}
+        onLayout={onSheetLayout}
+      >
         <View style={styles.grab} />
         {isLoading || !truck ? (
           <View style={{ alignItems: 'center', paddingVertical: spacing['3xl'] }}>
@@ -124,12 +140,22 @@ interface MapProps {
   lng?: number;
   heading: number;   // degrees, 0 = north
   moving: boolean;   // suppress rotation jitter at standstill
+  /** Pixels from the bottom edge. Null until the sheet has been measured. */
+  fabBottom: number | null;
 }
 
-function Map({ lat, lng, heading, moving }: MapProps) {
+function Map({ lat, lng, heading, moving, fabBottom }: MapProps) {
   const Mappls = getMappls();
   const cameraRef = useRef<any>(null);
+  const markerRef = useRef<{ refresh?: () => void } | null>(null);
   const [followLive, setFollowLive] = useState(true);
+
+  // Captured once. A fresh [lng, lat] array on later renders must not be
+  // handed to Camera as a new defaultSettings identity.
+  const defaultSettingsRef = useRef({
+    centerCoordinate: (lat != null && lng != null ? [lng, lat] : DEFAULT_CENTER) as [number, number],
+    zoomLevel: DEFAULT_ZOOM,
+  });
 
   // Animate the camera ONLY when lat/lng actually change AND follow is on.
   // Primitives in the dep list mean React.useEffect compares by value.
@@ -146,6 +172,15 @@ function Map({ lat, lng, heading, moving }: MapProps) {
       /* SDK not ready or stub */
     }
   }, [lat, lng, followLive]);
+
+  // PointAnnotation on Android snapshots its child into a bitmap. Refresh
+  // after heading changes so the rotation actually shows.
+  useEffect(() => {
+    const id = requestAnimationFrame(() => {
+      markerRef.current?.refresh?.();
+    });
+    return () => cancelAnimationFrame(id);
+  }, [heading, moving]);
 
   // User-gesture handler: disengage follow on pan/zoom so the map doesn't
   // snap back when the next position update arrives.
@@ -168,7 +203,6 @@ function Map({ lat, lng, heading, moving }: MapProps) {
 
   const { MapView, Camera, PointAnnotation } = Mappls;
   const haveCoords = lat != null && lng != null;
-  const center: [number, number] = haveCoords ? [lng!, lat!] : DEFAULT_CENTER;
 
   return (
     <>
@@ -180,11 +214,11 @@ function Map({ lat, lng, heading, moving }: MapProps) {
       >
         <Camera
           ref={cameraRef}
-          defaultSettings={{ centerCoordinate: center, zoomLevel: DEFAULT_ZOOM }}
+          defaultSettings={defaultSettingsRef.current}
           animationMode="flyTo"
         />
         {haveCoords && (
-          <PointAnnotation id="truck" coordinate={[lng!, lat!]}>
+          <PointAnnotation ref={markerRef} id="truck" coordinate={[lng!, lat!]}>
             <View style={styles.markerWrap}>
               <View
                 style={[
@@ -200,16 +234,19 @@ function Map({ lat, lng, heading, moving }: MapProps) {
         )}
       </MapView>
 
-      {/* Recenter / re-engage live-follow */}
-      <Pressable
-        onPress={() => setFollowLive(true)}
-        style={[styles.recenter, followLive && styles.recenterActive]}
-        hitSlop={8}
-        accessibilityRole="button"
-        accessibilityLabel={followLive ? 'Live follow on' : 'Recenter map on truck'}
-      >
-        <Text style={styles.recenterIcon}>📍</Text>
-      </Pressable>
+      {/* Recenter / re-engage live-follow. Sits just above the sheet, whose
+          height includes the home-indicator inset. */}
+      {fabBottom != null && (
+        <Pressable
+          onPress={() => setFollowLive(true)}
+          style={[styles.recenter, { bottom: fabBottom }, followLive && styles.recenterActive]}
+          hitSlop={8}
+          accessibilityRole="button"
+          accessibilityLabel={followLive ? 'Live follow on' : 'Recenter map on truck'}
+        >
+          <Text style={styles.recenterIcon}>📍</Text>
+        </Pressable>
+      )}
     </>
   );
 }
@@ -267,7 +304,7 @@ const styles = StyleSheet.create({
 
   // recenter FAB
   recenter: {
-    position: 'absolute', right: spacing.lg, bottom: 300,
+    position: 'absolute', right: spacing.lg,
     width: 48, height: 48, borderRadius: 999, backgroundColor: colors.surface,
     alignItems: 'center', justifyContent: 'center',
     shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.15, shadowRadius: 12, elevation: 4,
@@ -279,7 +316,7 @@ const styles = StyleSheet.create({
   sheet: {
     position: 'absolute', bottom: 0, left: 0, right: 0,
     backgroundColor: colors.surface, borderTopLeftRadius: 28, borderTopRightRadius: 28,
-    paddingTop: spacing.md + 2, paddingBottom: spacing['2xl'] + spacing.sm,
+    paddingTop: spacing.md + 2,
     paddingHorizontal: spacing['2xl'],
     shadowColor: '#000', shadowOffset: { width: 0, height: -4 }, shadowOpacity: 0.12, shadowRadius: 24, elevation: 12,
   },
