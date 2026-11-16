@@ -7,7 +7,7 @@
  *     truck reports.
  *   - `counts` memoized on the trucks array reference.
  */
-import React, { useCallback, useMemo } from 'react';
+import React, { useCallback, useMemo, useState } from 'react';
 import {
   View,
   Text,
@@ -18,7 +18,7 @@ import {
   Pressable,
   Alert,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useQuery } from '@tanstack/react-query';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { getAuth, signOut } from '@react-native-firebase/auth';
@@ -31,13 +31,17 @@ import { useLive } from '../lib/LiveProvider';
 import { useAuthStore } from '../store/auth';
 import { TruckCard } from '../components/TruckCard';
 import { haptics } from '../lib/haptics';
-import { colors, fontSize, fontWeight, minTouchTarget, radius, spacing } from '../theme';
+import { colors, fontSize, fontWeight, minTouchTarget, radius, spacing, type Status } from '../theme';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'Home'>;
 
+type FleetFilter = 'all' | Exclude<Status, 'Offline'>;
+
 export function HomeScreen({ navigation }: Props) {
   const clearSession = useAuthStore((s) => s.clear);
+  const insets = useSafeAreaInsets();
   const { status: liveStatus } = useLive();
+  const [filter, setFilter] = useState<FleetFilter>('all');
 
   const { data: trucks, isLoading, refetch, isFetching } = useQuery({
     queryKey: ['trucks'],
@@ -80,6 +84,12 @@ export function HomeScreen({ navigation }: Props) {
     return c;
   }, [trucks]);
 
+  const visible = useMemo(() => {
+    const all = trucks ?? [];
+    if (filter === 'all') return all;
+    return all.filter(t => statusFromPosition(t.latest) === filter);
+  }, [trucks, filter]);
+
   const renderItem = useCallback(
     ({ item }: { item: TruckSummary }) => (
       <TruckCard truck={item} onPress={() => handleCardPress(item)} />
@@ -104,25 +114,31 @@ export function HomeScreen({ navigation }: Props) {
           accessibilityHint="Signs you out of the app"
           hitSlop={12}
           style={({ pressed }) => [styles.logoutBtn, pressed && styles.logoutBtnPressed]}
-          android_ripple={{ color: '#ffffff44', borderless: true }}
+          android_ripple={{ color: '#00000010', borderless: false }}
         >
-          <Text style={styles.logoutText} maxFontSizeMultiplier={1.3}>Sign out</Text>
+          <Text style={styles.logoutText} maxFontSizeMultiplier={1.2}>Sign out</Text>
         </Pressable>
       </View>
 
       <View style={styles.summary}>
         <Pill label={`${counts.running} Running`} color={colors.statusRunning} />
         <Pill label={`${counts.idle} Idle`} color={colors.statusIdle} />
-        <Pill label={`Total ${counts.total}`} color={colors.textSecondary} />
+        <Pill label={`${counts.stopped} Stopped`} color={colors.statusStopped} />
+        <Pill label={`${counts.offline} Offline`} color={colors.statusOffline} />
       </View>
 
-      <View style={styles.separator} />
+      <View style={styles.filters}>
+        <FilterChip label={`All ${counts.total}`} on={filter === 'all'} onPress={() => setFilter('all')} />
+        <FilterChip label="Running" on={filter === 'Running'} onPress={() => setFilter('Running')} />
+        <FilterChip label="Idle" on={filter === 'Idle'} onPress={() => setFilter('Idle')} />
+        <FilterChip label="Stopped" on={filter === 'Stopped'} onPress={() => setFilter('Stopped')} />
+      </View>
 
       <FlatList
-        data={trucks ?? []}
+        data={visible}
         keyExtractor={(t) => t.device.id}
         renderItem={renderItem}
-        contentContainerStyle={styles.list}
+        contentContainerStyle={[styles.list, { paddingBottom: spacing['2xl'] + insets.bottom }]}
         ItemSeparatorComponent={Separator}
         refreshControl={
           <RefreshControl
@@ -138,7 +154,7 @@ export function HomeScreen({ navigation }: Props) {
               <ActivityIndicator size="large" color={colors.primary} />
             </View>
           ) : (
-            <EmptyState />
+            <EmptyState filtered={filter !== 'all' && (trucks?.length ?? 0) > 0} />
           )
         }
       />
@@ -174,8 +190,22 @@ function Pill({ label, color }: { label: string; color: string }) {
   return (
     <View style={styles.pill}>
       <View style={[styles.pillDot, { backgroundColor: color }]} />
-      <Text style={styles.pillLabel} maxFontSizeMultiplier={1.4}>{label}</Text>
+      <Text style={styles.pillLabel} numberOfLines={1} maxFontSizeMultiplier={1.15}>{label}</Text>
     </View>
+  );
+}
+
+function FilterChip({ label, on, onPress }: { label: string; on: boolean; onPress: () => void }) {
+  return (
+    <Pressable
+      onPress={onPress}
+      accessibilityRole="button"
+      accessibilityState={{ selected: on }}
+      accessibilityLabel={label}
+      style={({ pressed }) => [styles.filt, on && styles.filtOn, pressed && styles.pressed]}
+    >
+      <Text style={[styles.filtText, on && styles.filtTextOn]} maxFontSizeMultiplier={1.2}>{label}</Text>
+    </Pressable>
   );
 }
 
@@ -183,15 +213,19 @@ function Separator() {
   return <View style={{ height: spacing.md }} />;
 }
 
-function EmptyState() {
+function EmptyState({ filtered }: { filtered: boolean }) {
   return (
     <View style={styles.empty}>
       <View style={styles.emptyIcon}>
         <Text style={styles.emptyEmoji}>🚛</Text>
       </View>
-      <Text style={styles.emptyTitle} maxFontSizeMultiplier={1.3}>No trucks yet</Text>
+      <Text style={styles.emptyTitle} maxFontSizeMultiplier={1.3}>
+        {filtered ? 'Nothing in this filter' : 'No trucks yet'}
+      </Text>
       <Text style={styles.emptyBody} maxFontSizeMultiplier={1.3}>
-        Once a Pictor tracker connects, you'll see it here.
+        {filtered
+          ? 'Try All to see the rest of the fleet.'
+          : 'Once a Pictor tracker connects, you\'ll see it here.'}
       </Text>
     </View>
   );
@@ -209,46 +243,78 @@ const styles = StyleSheet.create({
   header: {
     flexDirection: 'row',
     alignItems: 'center',
+    gap: spacing.md,
     paddingHorizontal: spacing['2xl'],
-    paddingTop: spacing.lg,
-    paddingBottom: spacing.lg,
+    paddingTop: 10,
+    paddingBottom: spacing.sm,
     backgroundColor: colors.surface,
   },
   greeting: { fontSize: fontSize.bodyLg, color: colors.textSecondary, marginBottom: 2 },
-  title: { fontSize: fontSize.display, fontWeight: fontWeight.bold, color: colors.textPrimary },
+  title: {
+    fontSize: fontSize.display,
+    fontWeight: fontWeight.bold,
+    letterSpacing: -0.8,
+    color: colors.textPrimary,
+  },
 
   logoutBtn: {
     minHeight: minTouchTarget,
     minWidth: 88,
     paddingHorizontal: spacing.lg,
     borderRadius: radius.pill,
-    backgroundColor: colors.primary,
+    borderWidth: 1.5,
+    borderColor: colors.border,
+    backgroundColor: colors.surface,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  logoutBtnPressed: { opacity: 0.9 },
-  logoutText: { color: colors.primaryText, fontSize: fontSize.body, fontWeight: fontWeight.bold },
+  logoutBtnPressed: { opacity: 0.7 },
+  logoutText: { color: colors.textPrimary, fontSize: fontSize.body, fontWeight: fontWeight.semibold },
 
   summary: {
+    flexDirection: 'row',
+    flexWrap: 'nowrap',
+    gap: 6,
+    backgroundColor: colors.surface,
+    paddingHorizontal: spacing.lg,
+    paddingTop: spacing.sm,
+    paddingBottom: 14,
+  },
+  pill: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 5,
+    backgroundColor: colors.surfaceAlt,
+    paddingHorizontal: 8,
+    paddingVertical: 6,
+    borderRadius: radius.pill,
+  },
+  pillDot: { width: 8, height: 8, borderRadius: 99 },
+  pillLabel: { fontSize: fontSize.small, fontWeight: fontWeight.semibold, color: colors.textPrimary, flexShrink: 1 },
+
+  filters: {
     flexDirection: 'row',
     gap: spacing.sm,
     backgroundColor: colors.surface,
     paddingHorizontal: spacing['2xl'],
-    paddingBottom: spacing.md,
+    paddingBottom: 14,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.border,
   },
-  pill: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.sm - 2,
-    backgroundColor: colors.surfaceAlt,
-    paddingHorizontal: spacing.md,
-    paddingVertical: 6,
+  filt: {
+    height: 36,
+    paddingHorizontal: 14,
     borderRadius: radius.pill,
+    backgroundColor: colors.surfaceAlt,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
-  pillDot: { width: 8, height: 8, borderRadius: 999 },
-  pillLabel: { fontSize: fontSize.body, fontWeight: fontWeight.semibold, color: colors.textPrimary },
-
-  separator: { height: 1, backgroundColor: colors.border },
+  filtOn: { backgroundColor: colors.primary },
+  filtText: { fontSize: 14, fontWeight: fontWeight.semibold, color: colors.textSecondary },
+  filtTextOn: { color: '#fff' },
+  pressed: { opacity: 0.85 },
 
   list: { padding: spacing.lg, flexGrow: 1 },
   loader: { paddingTop: spacing['4xl'], alignItems: 'center' },

@@ -7,7 +7,7 @@
  */
 import React from 'react';
 import { View, Text, StyleSheet } from 'react-native';
-import { colorForStatus, fontSize, fontWeight, radius, spacing, Status } from '../theme';
+import { colorForStatus, fontSize, fontWeight, radius, Status } from '../theme';
 
 interface Props {
   status: Status;
@@ -38,13 +38,14 @@ const styles = StyleSheet.create({
   pill: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.sm,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
     borderRadius: radius.pill,
-    gap: spacing.sm - 2,
+    gap: 6,
+    flexShrink: 0,
   },
-  pillCompact: { paddingVertical: spacing.sm - 2 },
-  dot: { width: 9, height: 9, borderRadius: 999 },
+  pillCompact: { paddingVertical: 6 },
+  dot: { width: 9, height: 9, borderRadius: 99 },
   label: { fontSize: fontSize.body, fontWeight: fontWeight.semibold },
   labelCompact: { fontSize: fontSize.small },
 });

@@ -61,7 +61,9 @@ export function getHistory(id: string, fromISO: string, toISO: string, limit = 5
 export function liveWebSocketURL() {
   const token = useAuthStore.getState().apiToken ?? '';
   const httpUrl = new URL(`${BASE_URL}/v1/live`);
-  httpUrl.protocol = httpUrl.protocol === 'https:' ? 'wss:' : 'ws:';
-  httpUrl.searchParams.set('token', token);
-  return httpUrl.toString();
+  // URL.protocol is read-only in the TypeScript DOM lib. Rewriting the
+  // scheme keeps http→ws and https→wss without assigning the property.
+  const wsUrl = new URL(httpUrl.href.replace(/^http/, 'ws'));
+  wsUrl.searchParams.set('token', token);
+  return wsUrl.toString();
 }
