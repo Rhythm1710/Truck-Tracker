@@ -2,7 +2,6 @@
 backend/.env
 backend/firebase-service-account.json
 mobile/.env
-mobile/src/lib/env.ts
 mobile/src/lib/env.ts.local
 
 # --- iOS / Android Firebase artifacts (treat as secrets) ---

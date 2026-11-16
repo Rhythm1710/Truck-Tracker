@@ -101,7 +101,7 @@ func (h *Hub) fanout(deviceID string, payload []byte) {
 	h.clientsMu.RLock()
 	defer h.clientsMu.RUnlock()
 	for c := range h.clients {
-		if _, ok := c.deviceIDs[deviceID]; !ok {
+		if !c.ownsDevice(deviceID) {
 			continue
 		}
 		select {
@@ -218,6 +218,17 @@ type client struct {
 	send      chan []byte
 	deviceIDs map[string]struct{}
 	userID    string
+}
+
+// ownsDevice reports whether this client should receive a position for
+// deviceID. An empty id matches nobody — there is no truck to attribute
+// it to — and a nil or empty ownership set matches nobody either.
+func (c *client) ownsDevice(deviceID string) bool {
+	if c == nil || deviceID == "" || len(c.deviceIDs) == 0 {
+		return false
+	}
+	_, ok := c.deviceIDs[deviceID]
+	return ok
 }
 
 // readLoop discards inbound frames (we don't expect any) but maintains
