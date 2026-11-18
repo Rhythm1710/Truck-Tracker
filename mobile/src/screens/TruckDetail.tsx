@@ -119,7 +119,7 @@ export function TruckDetailScreen({ route, navigation }: Props) {
               <Stat label="Updated" value={formatRelativeTime(truck.latest?.at)} icon="🕐" />
               <Stat
                 label="Heading"
-                value={`${truck.latest ? Math.round(truck.latest.heading) : 0}°`}
+                value={formatHeading(truck.latest?.heading)}
                 icon="🧭"
               />
             </View>
@@ -164,7 +164,6 @@ function Map({ lat, lng, heading, moving, fabBottom }: MapProps) {
     try {
       cameraRef.current.setCamera({
         centerCoordinate: [lng, lat],
-        zoomLevel: DEFAULT_ZOOM,
         animationMode: 'flyTo',
         animationDuration: 800,
       });
@@ -249,6 +248,11 @@ function Map({ lat, lng, heading, moving, fabBottom }: MapProps) {
       )}
     </>
   );
+}
+
+function formatHeading(heading: number | undefined): string {
+  if (heading == null || Number.isNaN(heading)) return '—';
+  return `${Math.round(heading)}°`;
 }
 
 function Stat({ label, value, icon }: { label: string; value: string; icon: string }) {
