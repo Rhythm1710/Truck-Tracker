@@ -2,7 +2,7 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    branches: [master]
   pull_request:
 
 jobs:
@@ -20,7 +20,8 @@ jobs:
           cache-dependency-path: backend/go.sum
       - name: Tidy + vet
         run: |
-          go mod tidy -diff || (echo "go.mod / go.sum out of date" && exit 1)
+          go mod tidy
+          git diff --exit-code go.mod go.sum || (echo "go.mod / go.sum out of date" && exit 1)
           go vet ./...
       - name: Build
         run: go build ./...
@@ -46,3 +47,5 @@ jobs:
         run: npx tsc --noEmit
       - name: Lint
         run: npm run lint --if-present
+      - name: Unit tests
+        run: npm test -- --ci --watchman=false

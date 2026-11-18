@@ -13,6 +13,7 @@
  */
 import React, { useEffect, useRef } from 'react';
 import { Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
+import { isOtpComplete, sanitizeOtp } from '../lib/otp';
 import { colors, fontSize, fontWeight, radius, spacing } from '../theme';
 
 interface Props {
@@ -43,17 +44,16 @@ export function OTPInput({
   // Autosubmit on last digit — fire once per "complete" event.
   const completedRef = useRef(false);
   useEffect(() => {
-    if (value.length === cellCount && !completedRef.current) {
+    if (isOtpComplete(value, cellCount) && !completedRef.current) {
       completedRef.current = true;
       onComplete?.(value);
-    } else if (value.length < cellCount) {
+    } else if (!isOtpComplete(value, cellCount)) {
       completedRef.current = false;
     }
   }, [value, cellCount, onComplete]);
 
   const handleChange = (raw: string) => {
-    const digits = raw.replace(/\D/g, '').slice(0, cellCount);
-    onChange(digits);
+    onChange(sanitizeOtp(raw, cellCount));
   };
 
   const focused = value.length;
