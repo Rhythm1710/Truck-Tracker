@@ -87,6 +87,7 @@ android {
     }
     signingConfigs {
         debug {
+            // Not committed. ensureDebugKeystore creates this file on first build.
             storeFile file('debug.keystore')
             storePassword 'android'
             keyAlias 'androiddebugkey'
@@ -104,6 +105,40 @@ android {
             minifyEnabled enableProguardInReleaseBuilds
             proguardFiles getDefaultProguardFile("proguard-android.txt"), "proguard-rules.pro"
         }
+    }
+}
+
+// A fresh clone has no debug.keystore (it is gitignored). Create the
+// standard Android debug key before the app is signed.
+def debugKeystoreFile = file('debug.keystore')
+tasks.register('ensureDebugKeystore') {
+    doLast {
+        if (debugKeystoreFile.exists()) {
+            return
+        }
+        def bin = System.getProperty('os.name', '').toLowerCase().contains('windows') ? 'keytool.exe' : 'keytool'
+        def keytool = new File(System.getProperty('java.home'), "bin/${bin}")
+        if (!keytool.exists()) {
+            throw new GradleException("keytool not found at ${keytool}. Install a JDK, or create ${debugKeystoreFile} yourself.")
+        }
+        exec {
+            commandLine keytool.absolutePath,
+                    '-genkeypair',
+                    '-keystore', debugKeystoreFile.absolutePath,
+                    '-storetype', 'PKCS12',
+                    '-storepass', 'android',
+                    '-alias', 'androiddebugkey',
+                    '-keypass', 'android',
+                    '-keyalg', 'RSA',
+                    '-keysize', '2048',
+                    '-validity', '10000',
+                    '-dname', 'CN=Android Debug,O=Android,C=US'
+        }
+    }
+}
+afterEvaluate {
+    tasks.matching { it.name == 'preBuild' }.configureEach {
+        dependsOn tasks.named('ensureDebugKeystore')
     }
 }
 

@@ -60,8 +60,13 @@ npm run pods
 #      Physical device    → http://<your-mac-LAN-ip>:8080
 
 # 6. Android debug keystore (not in git)
-keytool -genkeypair -keystore android/app/debug.keystore -storepass android \
-  -alias androiddebugkey -keypass android -keyalg RSA -keysize 2048 -validity 10000 \
+#    The first `npm run android` runs the ensureDebugKeystore Gradle task,
+#    which creates android/app/debug.keystore with keytool when it is missing
+#    (store password android, alias androiddebugkey, key password android).
+#    To create it by hand instead:
+keytool -genkeypair -keystore android/app/debug.keystore -storetype PKCS12 \
+  -storepass android -alias androiddebugkey -keypass android \
+  -keyalg RSA -keysize 2048 -validity 10000 \
   -dname "CN=Android Debug,O=Android,C=US"
 
 # 7. Run
