@@ -96,23 +96,34 @@ export function OTPInput({
   );
 }
 
-const CELL = 52;
-
 const styles = StyleSheet.create({
   row: { flexDirection: 'row', justifyContent: 'space-between', gap: spacing.sm },
   cell: {
-    width: CELL,
-    height: CELL + 8,
+    flex: 1,
+    height: 60,
     borderRadius: radius.md,
     borderWidth: 2,
-    borderColor: colors.border,
+    borderColor: colors.divider,
     backgroundColor: colors.surfaceAlt,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  cellFilled: { borderColor: colors.textPrimary },
-  cellActive: { borderColor: colors.primary, backgroundColor: '#fff' },
-  digit: { fontSize: fontSize.display, fontWeight: fontWeight.bold, color: colors.textPrimary },
+  cellFilled: { borderColor: colors.textPrimary, backgroundColor: '#fff' },
+  cellActive: {
+    borderColor: colors.primary,
+    backgroundColor: '#fff',
+    shadowColor: '#1E40AF',
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0.15,
+    shadowRadius: 3,
+    elevation: 2,
+  },
+  digit: {
+    fontSize: fontSize.display,
+    fontWeight: fontWeight.bold,
+    letterSpacing: -0.5,
+    color: colors.textPrimary,
+  },
   hidden: {
     position: 'absolute',
     width: 1,

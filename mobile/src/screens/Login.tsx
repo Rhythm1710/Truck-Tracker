@@ -9,7 +9,7 @@
  *   - Inline error display (instead of modal Alert) — accessible to older users.
  *   - Haptic feedback on key transitions.
  */
-import React, { useCallback, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   View,
   Text,
@@ -21,7 +21,7 @@ import {
   ActivityIndicator,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { getAuth, signInWithPhoneNumber, getIdToken, FirebaseAuthTypes } from '@react-native-firebase/auth';
+import { getIdToken, FirebaseAuthTypes } from '@react-native-firebase/auth';
 
 import { colors, fontSize, fontWeight, radius, spacing } from '../theme';
 import { exchangeFirebaseToken } from '../lib/api';
@@ -29,6 +29,10 @@ import { useAuthStore } from '../store/auth';
 import { OTPInput } from '../components/OTPInput';
 import { haptics } from '../lib/haptics';
 import { digitsOnly, formatPhone, isValidPhone, toE164India } from '../lib/phone';
+import { requestSmsCode } from '../lib/smsCode';
+
+/** Seconds before another SMS can be requested. Not in the mockup. */
+const RESEND_COOLDOWN_SEC = 30;
 
 export function LoginScreen() {
   const setSession = useAuthStore((s) => s.setSession);
@@ -38,10 +42,20 @@ export function LoginScreen() {
   const [otp, setOtp] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [resendIn, setResendIn] = useState(0);
 
   const phoneInputRef = useRef<TextInput>(null);
 
-  async function handleGetOTP() {
+  const coolingDown = resendIn > 0;
+  useEffect(() => {
+    if (!coolingDown) return;
+    const id = setInterval(() => {
+      setResendIn(s => (s <= 1 ? 0 : s - 1));
+    }, 1000);
+    return () => clearInterval(id);
+  }, [coolingDown]);
+
+  async function sendCode(forceResend: boolean) {
     setError(null);
     if (!isValidPhone(phone)) {
       setError('Please enter a 10-digit mobile number.');
@@ -51,8 +65,10 @@ export function LoginScreen() {
     try {
       setBusy(true);
       haptics.tap();
-      const c = await signInWithPhoneNumber(getAuth(), toE164India(phone));
+      const c = await requestSmsCode(toE164India(phone), forceResend);
       setConfirm(c);
+      setOtp('');
+      setResendIn(RESEND_COOLDOWN_SEC);
       haptics.success();
     } catch (err: any) {
       // eslint-disable-next-line no-console
@@ -62,6 +78,15 @@ export function LoginScreen() {
     } finally {
       setBusy(false);
     }
+  }
+
+  function handleGetOTP() {
+    return sendCode(false);
+  }
+
+  function handleResend() {
+    if (resendIn > 0 || busy) return;
+    return sendCode(true);
   }
 
   const handleVerify = useCallback(
@@ -107,8 +132,13 @@ export function LoginScreen() {
           <Text style={styles.subtitle} maxFontSizeMultiplier={1.4}>
             {confirm ? 'Enter the OTP we just sent' : 'Sign in to see your trucks'}
           </Text>
+          {confirm ? (
+            <Text style={styles.sent} maxFontSizeMultiplier={1.4}>
+              Sent to +91 {formatPhone(phone)}
+            </Text>
+          ) : null}
 
-          <View style={{ height: spacing['4xl'] + spacing.lg }} />
+          <View style={{ height: confirm ? 36 : 40 }} />
 
           {!confirm ? (
             <>
@@ -149,9 +179,10 @@ export function LoginScreen() {
                 {busy ? (
                   <ActivityIndicator color={colors.primaryText} />
                 ) : (
-                  <Text style={styles.btnText} maxFontSizeMultiplier={1.3}>Get OTP</Text>
+                  <Text style={[styles.btnText, styles.btnTextLogin]} maxFontSizeMultiplier={1.3}>Get OTP</Text>
                 )}
               </Pressable>
+              <Text style={styles.hint} maxFontSizeMultiplier={1.4}>We'll send a 6-digit code by SMS.</Text>
             </>
           ) : (
             <>
@@ -182,13 +213,26 @@ export function LoginScreen() {
               </Pressable>
 
               <Pressable
-                onPress={() => { setConfirm(null); setOtp(''); setError(null); }}
-                style={styles.linkBtn}
+                onPress={() => { setConfirm(null); setOtp(''); setError(null); setResendIn(0); }}
+                style={({ pressed }) => [styles.linkBtn, pressed && styles.pressed]}
                 hitSlop={12}
                 accessibilityRole="button"
                 accessibilityLabel="Change phone number"
               >
                 <Text style={styles.linkText} maxFontSizeMultiplier={1.4}>Change number</Text>
+              </Pressable>
+
+              <Pressable
+                onPress={handleResend}
+                disabled={busy || resendIn > 0}
+                accessibilityRole="button"
+                accessibilityLabel={resendIn > 0 ? `Resend OTP in ${resendIn} seconds` : 'Resend OTP'}
+                accessibilityState={{ disabled: busy || resendIn > 0 }}
+                style={({ pressed }) => [styles.resendBtn, pressed && resendIn === 0 && styles.pressed]}
+              >
+                <Text style={[styles.resendText, (busy || resendIn > 0) && styles.resendTextWait]} maxFontSizeMultiplier={1.4}>
+                  {resendIn > 0 ? `Resend in ${resendIn}s` : "Didn't get it? Resend OTP"}
+                </Text>
               </Pressable>
             </>
           )}
@@ -224,19 +268,32 @@ function humanizeAuthError(err: any): string | null {
 
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: colors.surface },
-  content: { flex: 1, paddingHorizontal: spacing['2xl'], paddingTop: spacing['6xl'], paddingBottom: spacing['3xl'] },
+  content: { flex: 1, paddingHorizontal: spacing['2xl'], paddingTop: 28, paddingBottom: spacing.lg },
   iconBox: {
     width: 96, height: 96, backgroundColor: colors.primary, borderRadius: radius['2xl'],
     alignItems: 'center', justifyContent: 'center',
+    shadowColor: '#1E40AF',
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.22,
+    shadowRadius: 20,
+    elevation: 6,
   },
   iconEmoji: { fontSize: 52 },
-  title: { marginTop: spacing['3xl'], fontSize: fontSize.displayLg, fontWeight: fontWeight.bold, color: colors.textPrimary },
-  subtitle: { fontSize: fontSize.subtitle, color: colors.textSecondary, marginTop: spacing.xs },
-  label: { fontSize: fontSize.subtitle - 2, fontWeight: fontWeight.semibold, color: colors.textPrimary, marginBottom: spacing.md },
+  title: {
+    marginTop: 28,
+    fontSize: fontSize.displayLg,
+    fontWeight: fontWeight.bold,
+    letterSpacing: -1.2,
+    lineHeight: 40,
+    color: colors.textPrimary,
+  },
+  subtitle: { fontSize: fontSize.subtitle, lineHeight: 24, color: colors.textSecondary, marginTop: 6 },
+  sent: { fontSize: fontSize.body, color: colors.textSecondary, marginTop: 6 },
+  label: { fontSize: fontSize.bodyLg, fontWeight: fontWeight.semibold, color: colors.textPrimary, marginBottom: spacing.md },
   input: {
     flexDirection: 'row', alignItems: 'center', backgroundColor: colors.surfaceAlt,
-    borderRadius: radius.lg, borderWidth: 2, borderColor: colors.border, paddingHorizontal: spacing.xl, paddingVertical: spacing.lg + 4,
-    gap: spacing.md,
+    borderRadius: radius.lg, borderWidth: 2, borderColor: colors.border,
+    paddingHorizontal: spacing.xl, minHeight: 64, gap: spacing.md,
   },
   countryCode: { fontSize: fontSize.titleLg, fontWeight: fontWeight.semibold, color: colors.textPrimary },
   inputDivider: { width: 2, height: 28, backgroundColor: colors.divider },
@@ -247,15 +304,20 @@ const styles = StyleSheet.create({
     fontSize: fontSize.body,
     fontWeight: fontWeight.medium,
   },
+  hint: { marginTop: spacing.md, fontSize: 14, lineHeight: 20, color: colors.textSecondary, textAlign: 'center' },
   btn: {
     marginTop: spacing['3xl'], backgroundColor: colors.primary, borderRadius: radius.lg,
-    paddingVertical: spacing.xl + 2, alignItems: 'center', minHeight: 56,
-    justifyContent: 'center',
+    height: 56, alignItems: 'center', justifyContent: 'center',
   },
-  btnPressed: { opacity: 0.9, transform: [{ scale: 0.98 }] },
+  btnPressed: { opacity: 0.9 },
   btnDisabled: { opacity: 0.7 },
-  btnText: { color: colors.primaryText, fontSize: fontSize.title, fontWeight: fontWeight.bold },
-  linkBtn: { alignItems: 'center', paddingVertical: spacing.lg, minHeight: 48 },
+  btnText: { color: '#fff', fontSize: fontSize.title, fontWeight: fontWeight.bold },
+  btnTextLogin: { letterSpacing: -0.3 },
+  linkBtn: { alignItems: 'center', justifyContent: 'center', height: 48, marginTop: spacing.sm },
   linkText: { fontSize: fontSize.bodyLg, color: colors.textSecondary, fontWeight: fontWeight.medium },
+  resendBtn: { alignItems: 'center', justifyContent: 'center', height: 44 },
+  resendText: { fontSize: fontSize.body, fontWeight: fontWeight.semibold, color: colors.primary },
+  resendTextWait: { color: colors.textSecondary },
+  pressed: { opacity: 0.7 },
   help: { textAlign: 'center', color: colors.textSecondary, fontSize: fontSize.bodyLg, marginTop: spacing.lg },
 });

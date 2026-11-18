@@ -22,7 +22,6 @@ interface Props {
 function TruckCardImpl({ truck, onPress }: Props) {
   const { device, latest } = truck;
   const status = statusFromPosition(latest);
-  const moving = status === 'Running';
   const speed = latest ? Math.round(latest.speed) : 0;
 
   const handlePress = () => {
@@ -44,19 +43,19 @@ function TruckCardImpl({ truck, onPress }: Props) {
       android_ripple={{ color: '#00000010' }}
     >
       <View style={styles.topRow}>
-        <Text style={styles.plate} maxFontSizeMultiplier={1.3}>{device.plate}</Text>
+        <View style={styles.identity}>
+          <Text style={styles.plate} maxFontSizeMultiplier={1.3}>{device.plate}</Text>
+          {device.label ? (
+            <Text style={styles.truckLabel} maxFontSizeMultiplier={1.3} numberOfLines={1}>
+              {device.label}
+            </Text>
+          ) : null}
+        </View>
         <StatusPill status={status} compact />
       </View>
       <View style={styles.bottomRow}>
-        <View style={styles.metaItem}>
-          <Text style={styles.icon} maxFontSizeMultiplier={1}>{moving ? '💨' : '⏸'}</Text>
-          <Text style={styles.metaValue} maxFontSizeMultiplier={1.3}>{speed} km/h</Text>
-        </View>
-        <View style={{ flex: 1 }} />
-        <View style={styles.metaItem}>
-          <Text style={styles.icon} maxFontSizeMultiplier={1}>🕐</Text>
-          <RelativeTime iso={latest?.at} style={styles.metaTime} />
-        </View>
+        <Text style={styles.metaValue} maxFontSizeMultiplier={1.3}>{speed} km/h</Text>
+        <RelativeTime iso={latest?.at} style={styles.metaTime} />
       </View>
     </Pressable>
   );
@@ -76,6 +75,7 @@ export const TruckCard = React.memo(TruckCardImpl, (prev: Props, next: Props) =>
   return (
     prev.truck.device.id === next.truck.device.id &&
     prev.truck.device.plate === next.truck.device.plate &&
+    prev.truck.device.label === next.truck.device.label &&
     prev.truck.latest?.at === next.truck.latest?.at &&
     prev.truck.latest?.speed === next.truck.latest?.speed &&
     prev.truck.latest?.ignition === next.truck.latest?.ignition &&
@@ -87,8 +87,8 @@ const styles = StyleSheet.create({
   card: {
     backgroundColor: colors.surface,
     borderRadius: radius.xl,
-    paddingHorizontal: spacing.xl,
-    paddingVertical: spacing.lg + 2,
+    paddingHorizontal: 20,
+    paddingVertical: 16,
     borderWidth: 1,
     borderColor: colors.border,
     ...Platform.select({
@@ -100,15 +100,24 @@ const styles = StyleSheet.create({
       },
       android: { elevation: 1 },
     }),
-    gap: spacing.md,
     overflow: 'hidden', // keeps android_ripple inside the rounded corners
   },
   cardPressed: { transform: [{ scale: 0.99 }] },
-  topRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
-  bottomRow: { flexDirection: 'row', alignItems: 'center' },
-  plate: { fontSize: fontSize.title, fontWeight: fontWeight.bold, color: colors.textPrimary },
-  metaItem: { flexDirection: 'row', alignItems: 'center', gap: 6 },
-  icon: { fontSize: 16 },
+  topRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', gap: spacing.sm },
+  identity: { flex: 1 },
+  bottomRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: spacing.md },
+  plate: {
+    fontSize: fontSize.title,
+    fontWeight: fontWeight.bold,
+    letterSpacing: -0.4,
+    color: colors.textPrimary,
+  },
+  truckLabel: {
+    marginTop: 2,
+    fontSize: 14,
+    fontWeight: fontWeight.medium,
+    color: colors.textSecondary,
+  },
   metaValue: { fontSize: fontSize.subtitle, fontWeight: fontWeight.bold, color: colors.textPrimary },
   metaTime: { fontSize: fontSize.body, fontWeight: fontWeight.medium, color: colors.textSecondary },
 });
