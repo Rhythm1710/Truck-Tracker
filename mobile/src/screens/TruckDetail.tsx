@@ -124,7 +124,7 @@ export function TruckDetailScreen({ route, navigation }: Props) {
             <View style={styles.stats}>
               <Stat label="Speed" value={`${truck.latest ? Math.round(truck.latest.speed) : 0} km/h`} />
               <Stat label="Updated" value={formatRelativeTime(truck.latest?.at)} />
-              <Stat label="Heading" value={`${truck.latest ? Math.round(truck.latest.heading) : 0}°`} />
+              <Stat label="Heading" value={formatHeading(truck.latest?.heading)} />
             </View>
           </>
         )}
@@ -143,13 +143,22 @@ interface MapProps {
   lng?: number;
   heading: number;   // degrees, 0 = north
   moving: boolean;   // suppress rotation jitter at standstill
+  /** Pixels from the bottom edge. Null until the sheet has been measured. */
   fabBottom: number | null;
 }
 
 function Map({ lat, lng, heading, moving, fabBottom }: MapProps) {
   const Mappls = getMappls();
   const cameraRef = useRef<any>(null);
+  const markerRef = useRef<{ refresh?: () => void } | null>(null);
   const [followLive, setFollowLive] = useState(true);
+
+  // Captured once. A fresh [lng, lat] array on later renders must not be
+  // handed to Camera as a new defaultSettings identity.
+  const defaultSettingsRef = useRef({
+    centerCoordinate: (lat != null && lng != null ? [lng, lat] : DEFAULT_CENTER) as [number, number],
+    zoomLevel: DEFAULT_ZOOM,
+  });
 
   // Animate the camera ONLY when lat/lng actually change AND follow is on.
   // Primitives in the dep list mean React.useEffect compares by value.
@@ -158,7 +167,6 @@ function Map({ lat, lng, heading, moving, fabBottom }: MapProps) {
     try {
       cameraRef.current.setCamera({
         centerCoordinate: [lng, lat],
-        zoomLevel: DEFAULT_ZOOM,
         animationMode: 'flyTo',
         animationDuration: 800,
       });
@@ -166,6 +174,15 @@ function Map({ lat, lng, heading, moving, fabBottom }: MapProps) {
       /* SDK not ready or stub */
     }
   }, [lat, lng, followLive]);
+
+  // PointAnnotation on Android snapshots its child into a bitmap. Refresh
+  // after heading changes so the rotation actually shows.
+  useEffect(() => {
+    const id = requestAnimationFrame(() => {
+      markerRef.current?.refresh?.();
+    });
+    return () => cancelAnimationFrame(id);
+  }, [heading, moving]);
 
   // User-gesture handler: disengage follow on pan/zoom so the map doesn't
   // snap back when the next position update arrives.
@@ -188,7 +205,6 @@ function Map({ lat, lng, heading, moving, fabBottom }: MapProps) {
 
   const { MapView, Camera, PointAnnotation } = Mappls;
   const haveCoords = lat != null && lng != null;
-  const center: [number, number] = haveCoords ? [lng!, lat!] : DEFAULT_CENTER;
 
   return (
     <>
@@ -200,11 +216,11 @@ function Map({ lat, lng, heading, moving, fabBottom }: MapProps) {
       >
         <Camera
           ref={cameraRef}
-          defaultSettings={{ centerCoordinate: center, zoomLevel: DEFAULT_ZOOM }}
+          defaultSettings={defaultSettingsRef.current}
           animationMode="flyTo"
         />
         {haveCoords && (
-          <PointAnnotation id="truck" coordinate={[lng!, lat!]}>
+          <PointAnnotation ref={markerRef} id="truck" coordinate={[lng!, lat!]}>
             <View style={styles.markerWrap}>
               <View
                 style={[
@@ -220,7 +236,8 @@ function Map({ lat, lng, heading, moving, fabBottom }: MapProps) {
         )}
       </MapView>
 
-      {/* Recenter / re-engage live-follow */}
+      {/* Recenter / re-engage live-follow. Sits just above the sheet, whose
+          height includes the home-indicator inset. */}
       {fabBottom != null && (
         <Pressable
           onPress={() => setFollowLive(true)}
@@ -234,6 +251,11 @@ function Map({ lat, lng, heading, moving, fabBottom }: MapProps) {
       )}
     </>
   );
+}
+
+function formatHeading(heading: number | undefined): string {
+  if (heading == null || Number.isNaN(heading)) return '—';
+  return `${Math.round(heading)}°`;
 }
 
 function Stat({ label, value }: { label: string; value: string }) {
