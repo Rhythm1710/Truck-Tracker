@@ -36,6 +36,8 @@ const (
 	pingInterval    = 30 * time.Second
 	pongWait        = 60 * time.Second
 	defaultMaxMsgSz = 4 * 1024
+	// How often a live socket reloads the trucks its user owns.
+	deviceRefreshInterval = 60 * time.Second
 )
 
 // ---------------------------------------------------------------------------
@@ -55,16 +57,27 @@ type Hub struct {
 	clients   map[*client]struct{}
 
 	started sync.Once
+
+	// listDeviceIDs reloads ownership. Nil in tests that do not refresh.
+	// Production sets it from the store.
+	listDeviceIDs deviceIDLister
+	// deviceRefresh is how often refreshDevicesLoop reloads ownership.
+	// Zero means deviceRefreshInterval.
+	deviceRefresh time.Duration
 }
 
+// deviceIDLister returns the device ids owned by a user.
+type deviceIDLister func(ctx context.Context, ownerID string) ([]string, error)
+
 func NewHub(b *bus.Bus, secret string, log *slog.Logger, st *store.Store, m *metrics.Metrics) *Hub {
-	return &Hub{
-		bus:     b,
-		store:   st,
-		secret:  secret,
-		log:     log,
-		metrics: m,
-		clients: make(map[*client]struct{}),
+	h := &Hub{
+		bus:           b,
+		store:         st,
+		secret:        secret,
+		log:           log,
+		metrics:       m,
+		clients:       make(map[*client]struct{}),
+		deviceRefresh: deviceRefreshInterval,
 		up: websocket.Upgrader{
 			ReadBufferSize:  1024,
 			WriteBufferSize: 1024,
@@ -72,6 +85,10 @@ func NewHub(b *bus.Bus, secret string, log *slog.Logger, st *store.Store, m *met
 			CheckOrigin: func(*http.Request) bool { return true },
 		},
 	}
+	if st != nil {
+		h.listDeviceIDs = st.ListUserDeviceIDs
+	}
+	return h
 }
 
 // startBusReader spins up the single fan-out goroutine, lazily on first
@@ -101,7 +118,7 @@ func (h *Hub) fanout(deviceID string, payload []byte) {
 	h.clientsMu.RLock()
 	defer h.clientsMu.RUnlock()
 	for c := range h.clients {
-		if _, ok := c.deviceIDs[deviceID]; !ok {
+		if !c.ownsDevice(deviceID) {
 			continue
 		}
 		select {
@@ -178,6 +195,10 @@ func (h *Hub) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	defer h.unregister(c)
 	defer conn.Close()
 
+	refreshCtx, stopRefresh := context.WithCancel(context.Background())
+	defer stopRefresh()
+	go h.refreshDevicesLoop(refreshCtx, c)
+
 	h.log.Info("ws: client connected", "user", claims.UserID, "devices", len(deviceIDs))
 	defer h.log.Info("ws: client disconnected", "user", claims.UserID)
 
@@ -216,8 +237,77 @@ type outgoing struct {
 type client struct {
 	conn      *websocket.Conn
 	send      chan []byte
+	mu        sync.RWMutex
 	deviceIDs map[string]struct{}
 	userID    string
+}
+
+// ownsDevice reports whether this client should receive a position for
+// deviceID. An empty id matches nobody — there is no truck to attribute
+// it to — and a nil or empty ownership set matches nobody either.
+func (c *client) ownsDevice(deviceID string) bool {
+	if c == nil || deviceID == "" {
+		return false
+	}
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	if len(c.deviceIDs) == 0 {
+		return false
+	}
+	_, ok := c.deviceIDs[deviceID]
+	return ok
+}
+
+// setDeviceIDs replaces the ownership set. Blank ids are ignored so they
+// cannot become a wildcard.
+func (c *client) setDeviceIDs(ids []string) {
+	next := make(map[string]struct{}, len(ids))
+	for _, id := range ids {
+		if id == "" {
+			continue
+		}
+		next[id] = struct{}{}
+	}
+	c.mu.Lock()
+	c.deviceIDs = next
+	c.mu.Unlock()
+}
+
+// refreshClientDevices reloads this client's trucks from the store.
+// A lookup error leaves the previous set in place.
+func (h *Hub) refreshClientDevices(ctx context.Context, c *client) error {
+	if h == nil || h.listDeviceIDs == nil || c == nil {
+		return nil
+	}
+	ids, err := h.listDeviceIDs(ctx, c.userID)
+	if err != nil {
+		return err
+	}
+	c.setDeviceIDs(ids)
+	return nil
+}
+
+// refreshDevicesLoop reloads ownership until ctx is cancelled.
+func (h *Hub) refreshDevicesLoop(ctx context.Context, c *client) {
+	if h == nil || h.listDeviceIDs == nil || c == nil {
+		return
+	}
+	interval := h.deviceRefresh
+	if interval <= 0 {
+		interval = deviceRefreshInterval
+	}
+	t := time.NewTicker(interval)
+	defer t.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+			if err := h.refreshClientDevices(ctx, c); err != nil && h.log != nil {
+				h.log.Error("ws: refresh devices", "user", c.userID, "err", err)
+			}
+		}
+	}
 }
 
 // readLoop discards inbound frames (we don't expect any) but maintains
