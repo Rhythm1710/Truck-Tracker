@@ -8,6 +8,7 @@
     "start": "react-native start",
     "lint": "eslint . --ext .ts,.tsx",
     "tsc": "tsc --noEmit",
+    "test": "jest",
     "pods": "cd ios && pod install && cd .."
   },
   "dependencies": {

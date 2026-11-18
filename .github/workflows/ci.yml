@@ -47,3 +47,5 @@ jobs:
         run: npx tsc --noEmit
       - name: Lint
         run: npm run lint --if-present
+      - name: Unit tests
+        run: npm test -- --ci --watchman=false

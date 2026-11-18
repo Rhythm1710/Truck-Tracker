@@ -21,7 +21,7 @@ import {
   ActivityIndicator,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { getAuth, signInWithPhoneNumber, getIdToken, FirebaseAuthTypes } from '@react-native-firebase/auth';
+import { getIdToken, FirebaseAuthTypes } from '@react-native-firebase/auth';
 
 import { colors, fontSize, fontWeight, radius, spacing } from '../theme';
 import { exchangeFirebaseToken } from '../lib/api';
@@ -29,6 +29,7 @@ import { useAuthStore } from '../store/auth';
 import { OTPInput } from '../components/OTPInput';
 import { haptics } from '../lib/haptics';
 import { digitsOnly, formatPhone, isValidPhone, toE164India } from '../lib/phone';
+import { requestSmsCode } from '../lib/smsCode';
 
 /** Seconds before another SMS can be requested. Not in the mockup. */
 const RESEND_COOLDOWN_SEC = 30;
@@ -45,13 +46,14 @@ export function LoginScreen() {
 
   const phoneInputRef = useRef<TextInput>(null);
 
+  const coolingDown = resendIn > 0;
   useEffect(() => {
-    if (resendIn <= 0) return;
+    if (!coolingDown) return;
     const id = setInterval(() => {
       setResendIn(s => (s <= 1 ? 0 : s - 1));
     }, 1000);
     return () => clearInterval(id);
-  }, [resendIn]);
+  }, [coolingDown]);
 
   async function sendCode(forceResend: boolean) {
     setError(null);
@@ -63,7 +65,7 @@ export function LoginScreen() {
     try {
       setBusy(true);
       haptics.tap();
-      const c = await signInWithPhoneNumber(getAuth(), toE164India(phone), undefined, forceResend);
+      const c = await requestSmsCode(toE164India(phone), forceResend);
       setConfirm(c);
       setOtp('');
       setResendIn(RESEND_COOLDOWN_SEC);
