@@ -1,9 +1,12 @@
 package ws
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"log/slog"
+	"sync"
 	"testing"
 	"time"
 
@@ -207,4 +210,103 @@ func TestBusLoopFiltersByDeviceID(t *testing.T) {
 		t.Fatalf("bob received an unowned position %s", extra)
 	case <-time.After(150 * time.Millisecond):
 	}
+}
+
+func TestRefreshClientDevicesReplacesOwnership(t *testing.T) {
+	h, _ := testHub(t)
+	c := newClient("truck-a")
+	c.userID = "user-1"
+	h.register(c)
+	t.Cleanup(func() { h.unregister(c) })
+
+	owned := []string{"truck-a"}
+	h.listDeviceIDs = func(_ context.Context, ownerID string) ([]string, error) {
+		if ownerID != "user-1" {
+			t.Errorf("ownerID = %q", ownerID)
+		}
+		return append([]string(nil), owned...), nil
+	}
+
+	h.fanout("truck-b", []byte("before"))
+	if extra, ok := drain(c.send); ok {
+		t.Fatalf("received truck-b before refresh: %s", extra)
+	}
+
+	owned = []string{"truck-b", ""}
+	if err := h.refreshClientDevices(context.Background(), c); err != nil {
+		t.Fatal(err)
+	}
+
+	h.fanout("truck-a", []byte("old"))
+	if extra, ok := drain(c.send); ok {
+		t.Fatalf("still received truck-a: %s", extra)
+	}
+	h.fanout("truck-b", []byte("new"))
+	got, ok := drain(c.send)
+	if !ok || string(got) != "new" {
+		t.Fatalf("after refresh got %q ok=%v", got, ok)
+	}
+	h.fanout("", []byte("blank"))
+	if extra, ok := drain(c.send); ok {
+		t.Fatalf("blank device id delivered: %s", extra)
+	}
+}
+
+func TestRefreshClientDevicesKeepsSetOnLookupError(t *testing.T) {
+	h, _ := testHub(t)
+	c := newClient("truck-a")
+	c.userID = "user-1"
+	h.register(c)
+	t.Cleanup(func() { h.unregister(c) })
+
+	h.listDeviceIDs = func(context.Context, string) ([]string, error) {
+		return nil, errors.New("db down")
+	}
+	if err := h.refreshClientDevices(context.Background(), c); err == nil {
+		t.Fatal("expected lookup error")
+	}
+	h.fanout("truck-a", []byte("still"))
+	got, ok := drain(c.send)
+	if !ok || string(got) != "still" {
+		t.Fatalf("ownership was cleared: %q ok=%v", got, ok)
+	}
+}
+
+func TestRefreshDevicesLoopPicksUpNewTruck(t *testing.T) {
+	h, _ := testHub(t)
+	h.deviceRefresh = 20 * time.Millisecond
+	c := newClient("truck-a")
+	c.userID = "user-1"
+	h.register(c)
+	t.Cleanup(func() { h.unregister(c) })
+
+	var mu sync.Mutex
+	current := []string{"truck-a"}
+	h.listDeviceIDs = func(context.Context, string) ([]string, error) {
+		mu.Lock()
+		defer mu.Unlock()
+		return append([]string(nil), current...), nil
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go h.refreshDevicesLoop(ctx, c)
+
+	mu.Lock()
+	current = []string{"truck-c"}
+	mu.Unlock()
+
+	deadline := time.Now().Add(time.Second)
+	for time.Now().Before(deadline) {
+		h.fanout("truck-c", []byte("tick"))
+		if got, ok := drain(c.send); ok && string(got) == "tick" {
+			h.fanout("truck-a", []byte("old"))
+			if extra, ok := drain(c.send); ok {
+				t.Fatalf("old truck still delivered: %s", extra)
+			}
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatal("periodic refresh did not pick up truck-c")
 }
